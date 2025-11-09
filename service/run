@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "*** starting dbus-ble-advertisements ***"
+exec 2>&1
+. /etc/profile.d/profile.sh
+exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 /data/apps/dbus-ble-advertisements/dbus-ble-advertisements.py
+
