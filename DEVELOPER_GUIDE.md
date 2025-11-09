@@ -3,16 +3,77 @@
 This guide shows you how to build a Venus OS service that uses the `dbus-ble-advertisements` router for BLE scanning.
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Step 1: Check if Router is Available](#step-1-check-if-router-is-available)
-4. [Step 2: Set Up D-Bus Connection](#step-2-set-up-dbus-connection)
-5. [Step 3: Register Your Interests](#step-3-register-your-interests)
-6. [Step 4: Subscribe to Advertisement Signals](#step-4-subscribe-to-advertisement-signals)
-7. [Step 5: Process Advertisements](#step-5-process-advertisements)
-8. [Complete Example](#complete-example)
-9. [Best Practices](#best-practices)
-10. [Troubleshooting](#troubleshooting)
+1. [Why This Service Exists](#why-this-service-exists)
+2. [Overview](#overview)
+3. [Prerequisites](#prerequisites)
+4. [Step 1: Check if Router is Available](#step-1-check-if-router-is-available)
+5. [Step 2: Set Up D-Bus Connection](#step-2-set-up-dbus-connection)
+6. [Step 3: Register Your Interests](#step-3-register-your-interests)
+7. [Step 4: Subscribe to Advertisement Signals](#step-4-subscribe-to-advertisement-signals)
+8. [Step 5: Process Advertisements](#step-5-process-advertisements)
+9. [Complete Example](#complete-example)
+10. [Best Practices](#best-practices)
+11. [Troubleshooting](#troubleshooting)
+
+---
+
+## Why This Service Exists
+
+### The Problem
+
+On Venus OS (and most Linux systems using BlueZ), **only one process can actively scan for BLE devices at a time**. When multiple services try to scan simultaneously, you get errors like:
+
+```
+org.bluez.Error.InProgress: Operation already in progress
+```
+
+This creates serious problems:
+- 🚫 Can't run multiple BLE services simultaneously
+- 🚫 Services conflict and fail to discover devices
+- 🚫 Must choose which service gets BLE access
+- 🚫 Adding new BLE features breaks existing ones
+
+### Example Scenario
+
+Imagine you have:
+1. **Victron Orion-TR service** - needs to monitor DC-DC converters
+2. **SeeLevel tank sensor service** - needs to monitor tank levels
+3. **Future battery monitor** - needs to monitor battery BMS
+
+**Without the router:**
+```
+Service 1 starts scanning → ✅ Works
+Service 2 starts scanning → ❌ Error: Operation already in progress
+Service 3 starts scanning → ❌ Error: Operation already in progress
+```
+
+Only one service works. The others fail.
+
+**With the router:**
+```
+Router starts btmon → Monitors ALL BLE traffic
+Service 1 registers → ✅ Gets its advertisements via D-Bus
+Service 2 registers → ✅ Gets its advertisements via D-Bus  
+Service 3 registers → ✅ Gets its advertisements via D-Bus
+```
+
+All services work simultaneously!
+
+### The Solution
+
+The `dbus-ble-advertisements` router:
+1. **Runs ONE passive monitor** (`btmon`) that captures ALL BLE advertisements
+2. **Services register their interests** via D-Bus (no scanning needed)
+3. **Router filters and distributes** advertisements to interested services
+4. **No conflicts** - btmon is passive and doesn't interfere with anything
+
+### Why btmon?
+
+Unlike active BLE scanning (Bleak, BlueZ D-Bus API), `btmon` is **passive**:
+- ✅ Doesn't take control of the Bluetooth adapter
+- ✅ Multiple processes can read HCI data simultaneously
+- ✅ Zero conflicts with other BLE operations
+- ✅ Sees ALL advertisements from ALL adapters (hci0, hci1, etc.)
 
 ---
 
