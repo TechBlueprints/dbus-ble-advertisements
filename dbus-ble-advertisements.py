@@ -34,7 +34,9 @@ import sys
 import time
 import logging
 import signal
-from typing import Dict, Set, Tuple
+import json
+import os
+from typing import Dict, Set, Tuple, Optional
 
 import dbus
 import dbus.service
@@ -43,6 +45,7 @@ from gi.repository import GLib
 
 HEARTBEAT_INTERVAL = 600  # 10 minutes
 REGISTRATION_SCAN_INTERVAL = 30  # Scan for new registrations every 30 seconds
+DEVICES_CONFIG_FILE = "/data/apps/dbus-ble-advertisements/devices.json"
 
 
 class AdvertisementEmitter(dbus.service.Object):
@@ -98,6 +101,96 @@ class RootObject(dbus.service.Object):
         self.heartbeat = time.time()
 
 
+class SettingsObject(dbus.service.Object):
+    """D-Bus object for UI settings - implements VeDbusItem pattern"""
+    
+    def __init__(self, bus_name, path, initial_value=0):
+        dbus.service.Object.__init__(self, bus_name, path)
+        self._value = initial_value
+        self._path = path
+        logging.info(f"SettingsObject created at {path} with initial value: {initial_value}")
+    
+    @dbus.service.method(dbus_interface='com.victronenergy.BusItem',
+                         in_signature='', out_signature='v')
+    def GetValue(self):
+        """Return current value"""
+        logging.info(f"GetValue called on {self._path}, returning: {self._value}")
+        return self._value
+    
+    @dbus.service.method(dbus_interface='com.victronenergy.BusItem',
+                         in_signature='v', out_signature='i')
+    def SetValue(self, value):
+        """Set value - returns 0 on success"""
+        old_value = self._value
+        self._value = int(value)
+        logging.info(f"SetValue called on {self._path}, changed from {old_value} to {self._value}")
+        self.PropertiesChanged({'Value': self._value})
+        return 0
+    
+    @dbus.service.method(dbus_interface='com.victronenergy.BusItem',
+                         in_signature='', out_signature='s')
+    def GetText(self):
+        """Return text representation"""
+        logging.info(f"GetText called on {self._path}, returning: {str(self._value)}")
+        return str(self._value)
+    
+    @dbus.service.signal(dbus_interface='com.victronenergy.BusItem',
+                         signature='a{sv}')
+    def PropertiesChanged(self, changes):
+        """Signal emitted when value changes"""
+        pass
+
+
+class UIDevice(dbus.service.Object):
+    """
+    D-Bus object representing a device in the UI
+    
+    Published on com.victronenergy.ble service so it appears in the
+    Bluetooth Sensors UI alongside Mopeka/Ruuvi devices.
+    """
+    
+    def __init__(self, bus, device_id: str, device_name: str, enabled: bool = False):
+        """
+        Create a UI device entry
+        
+        Args:
+            bus: D-Bus connection
+            device_id: Unique device identifier (e.g., 'ble_integrations_master' or 'integration_oriontr_02e1')
+            device_name: Display name for the device
+            enabled: Initial enabled state
+        """
+        self.device_id = device_id
+        self.device_name = device_name
+        self._enabled = enabled
+        
+        # We need to get the bus name for com.victronenergy.ble
+        # Note: This might fail if dbus-ble-sensors isn't running
+        try:
+            # We don't own this bus name, we just publish objects on it
+            # The bus name is owned by dbus-ble-sensors
+            proxy = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
+            dbus_iface = dbus.Interface(proxy, 'org.freedesktop.DBus')
+            
+            if 'com.victronenergy.ble' not in dbus_iface.ListNames():
+                logging.error("com.victronenergy.ble service not found - cannot publish UI devices")
+                raise RuntimeError("com.victronenergy.ble service not available")
+            
+            # Create object paths for Name and Enabled
+            name_path = f"/Devices/{device_id}/Name"
+            enabled_path = f"/Devices/{device_id}/Enabled"
+            
+            # Initialize D-Bus objects
+            # Note: We can't use BusName here since we don't own the name
+            # We'll use the bus directly and create objects that others can see
+            dbus.service.Object.__init__(self, bus, name_path)
+            
+            logging.info(f"Created UI device: {device_name} at /Devices/{device_id}")
+            
+        except Exception as e:
+            logging.error(f"Failed to create UI device {device_id}: {e}")
+            raise
+
+
 class BLEAdvertisementRouter:
     """
     BLE Advertisement Router Service
@@ -109,10 +202,94 @@ class BLEAdvertisementRouter:
     
     def __init__(self, bus):
         self.bus = bus
-        self.bus_name = dbus.service.BusName('com.victronenergy.ble.advertisements', bus)
         
-        # Create root object for service presence
-        self.root_object = RootObject(self.bus_name)
+        # Import VeDbusService for creating a proper Venus OS device
+        sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'ext', 'velib_python'))
+        from vedbus import VeDbusService
+        from settingsdevice import SettingsDevice
+        
+        # Create as a switch device so it appears in the device list with settings
+        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_router', bus, register=False)
+        
+        # Add mandatory paths for Venus OS device
+        self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
+        self.dbusservice.add_path('/Mgmt/ProcessVersion', '1.0.0')
+        self.dbusservice.add_path('/Mgmt/Connection', 'BLE Router')
+        self.dbusservice.add_path('/DeviceInstance', 50)
+        self.dbusservice.add_path('/ProductId', 0xFFFF)
+        self.dbusservice.add_path('/ProductName', 'BLE Advertisement Router')
+        self.dbusservice.add_path('/CustomName', 'BLE Router')
+        self.dbusservice.add_path('/FirmwareVersion', '1.0.0')
+        self.dbusservice.add_path('/HardwareVersion', None)
+        self.dbusservice.add_path('/Connected', 1)
+        
+        # Add switch-specific paths (required for switch devices)
+        self.dbusservice.add_path('/State', 0x100)  # 0x100 = Connected (module-level state)
+        
+        # Create a single switchable output for new device discovery toggle
+        # Use relay_1 identifier - matching RemoteGPIO and GX IO Extender relay pattern
+        output_path = '/SwitchableOutput/relay_1'
+        self.dbusservice.add_path(f'{output_path}/Name', 'BLE Router New Device Discovery')
+        self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle (at output level for GUI rendering)
+        self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
+                                   onchangecallback=self._on_discovery_changed)
+        self.dbusservice.add_path(f'{output_path}/Status', 0x00)  # 0x00 = Off, 0x09 = On
+        
+        # Add settings paths (under /Settings/)
+        self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)  # 1 = toggle
+        self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)  # Bitmask: bit 1 set = toggle (0b10 = 2)
+        self.dbusservice.add_path(f'{output_path}/Settings/Function', 2, writeable=True)  # 2 = Manual
+        self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)  # Bitmask: bit 2 set = Manual (0b100 = 4)
+        self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
+        
+        # Register the service after ALL paths are added
+        # Note: We'll create switchable outputs dynamically as devices are discovered
+        self.dbusservice.register()
+        
+        # Track discovered devices that should appear as switchable outputs
+        # Note: /SwitchableOutput is a container path, not a leaf - it's created implicitly by its children
+        # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
+        self.discovered_devices: Dict[str, dict] = {}
+        
+        # Register device in settings (for GUI device list)
+        settings = {
+            "ClassAndVrmInstance": [
+                "/Settings/Devices/ble_router/ClassAndVrmInstance",
+                "switch:50",
+                0,
+                0,
+            ],
+            "DiscoveryEnabled": [
+                "/Settings/Devices/ble_router/DiscoveryEnabled",
+                0,  # Default: OFF
+                0,
+                1,
+            ],
+        }
+        self._settings = SettingsDevice(
+            bus,
+            settings,
+            eventCallback=self._on_settings_changed,
+            timeout=10
+        )
+        
+        # Restore discovery state from settings
+        discovery_state = self._settings['DiscoveryEnabled']
+        self.dbusservice['/SwitchableOutput/relay_1/State'] = discovery_state
+        self.dbusservice['/SwitchableOutput/relay_1/Status'] = 0x09 if discovery_state else 0x00
+        if discovery_state:
+            logging.info("Discovery enabled from saved settings")
+        
+        # Restore previously discovered devices from persistent storage
+        self._load_discovered_devices()
+        
+        logging.info("Created BLE Router device service as switch device")
+        
+        # TODO: Re-implement com.victronenergy.ble.advertisements as a separate service
+        # for advertisement signal routing to client services
+        # For now, we're only implementing the UI control via the switch device
         
         # Filters: manufacturer IDs and MAC addresses we care about
         # Key: mfg_id or MAC, Value: set of full registration paths
@@ -145,7 +322,7 @@ class BLEAdvertisementRouter:
         # We'll emit signals to ALL possible paths for a given advertisement and let D-Bus handle delivery.
         logging.info("Router ready - will emit signals to matching registration paths as advertisements arrive")
         
-        # Subscribe to D-Bus NameOwnerChanged signals to clear cache when services disappear
+        # Subscribe to D-Bus NameOwnerChanged signals to detect when services appear/disappear
         self.bus.add_signal_receiver(
             self._on_name_owner_changed,
             signal_name='NameOwnerChanged',
@@ -155,12 +332,272 @@ class BLEAdvertisementRouter:
         
         # Update heartbeat every 10 minutes
         GLib.timeout_add_seconds(600, self._update_heartbeat)
+    
+    def _on_relay_state_changed(self, path: str, value: int):
+        """Callback when a discovered device relay state changes"""
+        # Extract relay_id from path like "/SwitchableOutput/relay_efc1119da391/State"
+        # The relay_id is the MAC address without colons
+        path_parts = path.split('/')
+        if len(path_parts) < 3 or not path_parts[2].startswith('relay_'):
+            logging.warning(f"Unexpected path format in _on_relay_state_changed: {path}")
+            return True
         
-        logging.info(f"Router initialized")
+        relay_id = path_parts[2].replace('relay_', '')  # e.g., "efc1119da391"
+        
+        # Find which device_id is mapped to this relay_id
+        for device_id, device_info in self.discovered_devices.items():
+            if device_info.get('relay_id') == relay_id:
+                device_info['enabled'] = (value == 1)
+                device_name = device_info['name']
+                logging.info(f"Device '{device_name}' routing changed to: {'enabled' if value == 1 else 'disabled'}")
+                
+                # Update Status to match State (0x00 = off, 0x09 = on)
+                self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if value == 1 else 0x00
+                
+                # Persist the change
+                self._save_discovered_devices()
+                return True
+        
+        logging.warning(f"State change for relay_{relay_id} but no device mapped to it")
+        return True  # Accept the change anyway
+    
+    def _on_settings_changed(self, setting, old_value, new_value):
+        """Callback when a setting changes in com.victronenergy.settings"""
+        logging.debug(f"Setting changed: {setting} = {new_value}")
+        # Settings are already updated by SettingsDevice, no action needed
+    
+    def _on_discovery_changed(self, path, value):
+        """Callback when new device discovery toggle (SwitchableOutput/relay_1/State) changes"""
+        enabled = (value == 1)
+        logging.info(f"New device discovery changed to: {enabled}")
+        
+        # Save to persistent settings
+        self._settings['DiscoveryEnabled'] = value
+        
+        # Update Status to match State (0x00 = Off, 0x09 = On per Venus documentation)
+        self.dbusservice['/SwitchableOutput/relay_1/Status'] = 0x09 if enabled else 0x00
+        
+        if enabled:
+            # Discovery enabled: make main toggle and all device toggles visible
+            logging.info("Discovery enabled - making all switches visible")
+            self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 1
+            
+            # Make all discovered device toggles visible
+            for device_id, device_info in self.discovered_devices.items():
+                output_idx = device_info['output_idx']
+                output_path = f'/SwitchableOutput/relay_{output_idx}'
+                self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 1
+                logging.info(f"Made {device_info['name']} visible in switches pane")
+        else:
+            # Discovery disabled: hide main toggle and all device toggles
+            logging.info("Discovery disabled - hiding all switches")
+            self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 0
+            
+            # Hide all discovered device toggles
+            for device_id, device_info in self.discovered_devices.items():
+                output_idx = device_info['output_idx']
+                output_path = f'/SwitchableOutput/relay_{output_idx}'
+                self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
+                logging.info(f"Hidden {device_info['name']} from switches pane")
+        
+        return True  # Accept the change
+    
+    def _save_discovered_devices(self):
+        """Save discovered devices to persistent storage"""
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(DEVICES_CONFIG_FILE), exist_ok=True)
+            
+            # Save device info
+            with open(DEVICES_CONFIG_FILE, 'w') as f:
+                json.dump(self.discovered_devices, f, indent=2)
+            
+            logging.debug(f"Saved {len(self.discovered_devices)} discovered devices to {DEVICES_CONFIG_FILE}")
+        except Exception as e:
+            logging.error(f"Failed to save discovered devices: {e}")
+    
+    def _load_discovered_devices(self):
+        """Load discovered devices from persistent storage and restore their slots"""
+        try:
+            if not os.path.exists(DEVICES_CONFIG_FILE):
+                logging.info("No saved devices found")
+                return
+            
+            with open(DEVICES_CONFIG_FILE, 'r') as f:
+                saved_devices = json.load(f)
+            
+            if not saved_devices:
+                logging.info("No devices to restore")
+                return
+            
+            logging.info(f"Restoring {len(saved_devices)} discovered devices from persistent storage...")
+            
+            for device_id, device_info in saved_devices.items():
+                relay_id = device_info['relay_id']
+                name = device_info['name']
+                enabled = device_info.get('enabled', True)
+                
+                # Recreate the D-Bus paths for this device
+                output_path = f'/SwitchableOutput/relay_{relay_id}'
+                self.dbusservice.add_path(f'{output_path}/Name', name)
+                self.dbusservice.add_path(f'{output_path}/Type', 1)
+                self.dbusservice.add_path(f'{output_path}/State', 1 if enabled else 0, writeable=True,
+                                           onchangecallback=self._on_relay_state_changed)
+                self.dbusservice.add_path(f'{output_path}/Status', 0x09 if enabled else 0x00)
+                self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
+                self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
+                self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
+                self.dbusservice.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
+                self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
+                self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
+                
+                # Only show if discovery is enabled
+                discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State']
+                self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1 if discovery_enabled else 0, writeable=True)
+                
+                # Restore to in-memory tracking
+                self.discovered_devices[device_id] = device_info
+                
+                logging.info(f"Restored device: {name} at {output_path} (enabled={enabled})")
+            
+            logging.info(f"Device restoration complete - {len(saved_devices)} devices restored")
+        except Exception as e:
+            logging.error(f"Failed to load discovered devices: {e}", exc_info=True)
+    
+    def _update_device_name_if_exists(self, mac: str, name: str):
+        """Update the toggle name for a device if it's already been discovered"""
+        device_id = f"mac_{mac.replace(':', '').lower()}"
+        if device_id in self.discovered_devices:
+            device_info = self.discovered_devices[device_id]
+            relay_id = device_info['relay_id']
+            output_path = f'/SwitchableOutput/relay_{relay_id}'
+            
+            # Format: "Name (MAC)" - much more readable than just MAC
+            new_name = f"{name} ({mac})"
+            
+            # Update the D-Bus path
+            self.dbusservice[f'{output_path}/Name'] = new_name
+            
+            # Update in-memory cache
+            device_info['name'] = new_name
+            
+            # Persist the change
+            self._save_discovered_devices()
+            
+            logging.info(f"Updated device name: {new_name}")
+    
+    def _add_discovered_device(self, device_id: str, name: str, device_type: str):
+        """
+        Create a new switchable output for a discovered device.
+        
+        Only adds if discovery is enabled and device doesn't already exist.
+        Defaults: State=1 (enabled), ShowUIControl=1 (visible)
+        
+        Args:
+            device_id: Sanitized identifier (e.g., "mac_abc123" or "mfgr_737")
+            name: Human-readable name (e.g., "Orion TR (EF:C2:7B:38:54:60)" or "Mfgr 0x2E1")
+            device_type: "mac" or "mfgr"
+        """
+        # Only add if discovery is enabled and device doesn't already exist
+        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State']
+        if discovery_enabled == 0 or device_id in self.discovered_devices:
+            return
+        
+        # Use MAC address (without colons) as relay identifier
+        # device_id format is "mac_abc123", so we can use it directly after "mac_"
+        relay_id = device_id.replace('mac_', '')  # e.g., "efc1119da391"
+        output_path = f'/SwitchableOutput/relay_{relay_id}'
+        
+        # Create new D-Bus paths for this device
+        self.dbusservice.add_path(f'{output_path}/Name', name)
+        self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle
+        self.dbusservice.add_path(f'{output_path}/State', 1, writeable=True,
+                                   onchangecallback=self._on_relay_state_changed)  # Enabled by default
+        self.dbusservice.add_path(f'{output_path}/Status', 0x09)  # On
+        self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
+        self.dbusservice.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
+        self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
+        self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # Visible
+        
+        # Store device info
+        self.discovered_devices[device_id] = {
+            'relay_id': relay_id,  # Store the relay identifier
+            'name': name,
+            'type': device_type,
+            'enabled': True  # Track if routing is enabled for this device
+        }
+        
+        logging.info(f"Added discovered device: {name} (ID: {device_id}) at {output_path} - enabled and visible")
+        
+        # Persist to disk
+        self._save_discovered_devices()
+    
+    def _remove_discovered_device(self, device_id: str):
+        """Hide a discovered device's switchable output slot"""
+        if device_id not in self.discovered_devices:
+            return
+        
+        device_info = self.discovered_devices[device_id]
+        relay_id = device_info['relay_id']
+        output_path = f'/SwitchableOutput/relay_{relay_id}'
+        
+        # Hide the slot but keep it allocated
+        self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
+        self.dbusservice[f'{output_path}/State'] = 0
+        self.dbusservice[f'{output_path}/Status'] = 0x00
+        
+        logging.info(f"Hid device {device_info['name']} from switches pane")
+        del self.discovered_devices[device_id]
+    
+    def _on_device_state_changed(self, device_id: str, path: str, value: int):
+        """DEPRECATED - now using _on_relay_state_changed"""
+        # This method is kept for backwards compatibility but should not be called
+        logging.warning("_on_device_state_changed called but is deprecated")
+        return True
+    
+    def _scan_existing_services(self):
+        """Scan all existing D-Bus services for BLE registrations (called once at startup)"""
+        logging.info("=== INITIAL SERVICE SCAN STARTING ===")
+        logging.info(f"_scan_existing_services called at {time.time()}")
+        try:
+            logging.info("Scanning existing D-Bus services for BLE registrations...")
+            bus_obj = self.bus.get_object('org.freedesktop.DBus', '/')
+            bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
+            service_names = bus_iface.ListNames()
+            
+            # Only check likely client services (not system services)
+            # Note: Some services register with custom names (e.g., orion_tr, seelevel) before creating device services
+            likely_clients = ['com.victronenergy.tank.', 'com.victronenergy.charger.', 'com.victronenergy.dcdc.', 
+                              'com.victronenergy.orion_tr', 'com.victronenergy.seelevel']
+            victron_services = [s for s in service_names 
+                                if isinstance(s, str) and 
+                                any(s.startswith(prefix) if prefix.endswith('.') else s == prefix for prefix in likely_clients)]
+            
+            logging.info(f"Found {len(victron_services)} likely client services to check: {victron_services}")
+            
+            checked = 0
+            for service_name in victron_services:
+                checked += 1
+                logging.info(f"[{checked}/{len(victron_services)}] Checking {service_name}...")
+                self._check_service_registrations(service_name)
+            
+            logging.info(f"Initial scan complete - found {len(self.mfg_registrations)} mfgr registrations, {len(self.mac_registrations)} MAC registrations")
+            if self.mfg_registrations:
+                logging.info(f"Manufacturer IDs registered: {list(self.mfg_registrations.keys())}")
+            if self.mac_registrations:
+                logging.info(f"MAC addresses registered: {list(self.mac_registrations.keys())}")
+        except Exception as e:
+            logging.error(f"Error scanning existing services: {e}", exc_info=True)
+        
+        logging.info("=== INITIAL SERVICE SCAN COMPLETE - btmon processing should resume ===")
+        return False  # Don't repeat this idle callback
     
     def _update_heartbeat(self):
         """Periodic callback to update heartbeat timestamp"""
-        self.root_object.update_heartbeat()
+        # TODO: Re-implement heartbeat for advertisement service monitoring
         logging.debug("Heartbeat updated")
         return True  # Keep the timer running
     
@@ -189,18 +626,28 @@ class BLEAdvertisementRouter:
             if not service_name.startswith('com.victronenergy.'):
                 return
             
+            logging.debug(f"  Introspecting {service_name}...")
             obj = self.bus.get_object(service_name, '/')
             intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
-            xml = intro.Introspect()
+            
+            # Add timeout to avoid hanging on unresponsive services
+            xml = intro.Introspect(timeout=2.0)
             
             # Quick check: does this service have /ble_advertisements paths?
             if 'ble_advertisements' in xml:
-                logging.info(f"Service {service_name} appeared, checking for registrations...")
+                logging.info(f"  ✓ Service {service_name} has ble_advertisements, parsing...")
                 # Parse just this service's registrations
                 self._parse_registrations(service_name, '/', xml)
                 self._update_emitters()
+            else:
+                logging.debug(f"  - Service {service_name} has no ble_advertisements")
+        except dbus.exceptions.DBusException as e:
+            if 'Timeout' in str(e):
+                logging.warning(f"  ! Service {service_name} introspection timeout (skipping)")
+            else:
+                logging.debug(f"  - Could not check {service_name}: {e}")
         except Exception as e:
-            logging.debug(f"Could not check {service_name}: {e}")
+            logging.debug(f"  - Could not check {service_name}: {e}")
     
     def _remove_service_registrations(self, service_name):
         """Remove all registrations and emitters for a service that disappeared"""
@@ -344,12 +791,14 @@ class BLEAdvertisementRouter:
             
             elif '/ble_advertisements/' in path and '/addr/' in path:
                 # Extract MAC from path
-                # e.g., /ble_advertisements/orion_tr/addr/EFC1119DA391
+                # e.g., /ble_advertisements/orion_tr/addr/ef_c1_11_9d_a3_91 or /addr/EFC1119DA391
                 parts = path.split('/addr/')
                 if len(parts) == 2:
                     mac_part = parts[1]
+                    # Remove underscores first (some services use them instead of colons)
+                    mac_part = mac_part.replace('_', '')
                     # Convert to standard format with colons
-                    if ':' not in mac_part:
+                    if ':' not in mac_part and len(mac_part) == 12:
                         mac = ':'.join([mac_part[i:i+2] for i in range(0, 12, 2)])
                     else:
                         mac = mac_part
@@ -357,7 +806,7 @@ class BLEAdvertisementRouter:
                     if mac not in self.mac_registrations:
                         self.mac_registrations[mac] = set()
                     self.mac_registrations[mac].add(path)
-                    logging.debug(f"Registered {path} from {service_name}")
+                    logging.debug(f"Registered {path} from {service_name} (MAC: {mac})")
             
             # Recursively check child nodes
             for node in root.findall('node'):
@@ -454,6 +903,8 @@ class BLEAdvertisementRouter:
             self.current_name = name_match.group(1).strip()
             # Update device name cache
             self.device_names[self.current_mac] = self.current_name
+            # Update the toggle name if this device is already discovered
+            self._update_device_name_if_exists(self.current_mac, self.current_name)
             return
         
         # Match RSSI
@@ -488,9 +939,11 @@ class BLEAdvertisementRouter:
     
     def process_advertisement(self, mac: str, mfg_id: int, hex_data: str, rssi: int, interface: str):
         """Process a complete BLE advertisement"""
-        # Check if this matches our filters
-        if not self.should_process_advertisement(mac, mfg_id):
-            return
+        # Step 1: Check if anything is registered to receive these notifications
+        # (either for this specific MAC or this manufacturer ID)
+        has_registration = (mac in self.mac_registrations) or (mfg_id in self.mfg_registrations)
+        if not has_registration:
+            return  # No one cares about this advertisement
         
         # Convert hex string to bytes
         try:
@@ -499,11 +952,42 @@ class BLEAdvertisementRouter:
             logging.warning(f"Invalid hex data from {mac}: {hex_data}")
             return
         
-        # Check if we should emit this update (deduplication without interface/rssi)
+        # Check if we should emit this update (deduplication)
         if not self.should_emit_update(mac, mfg_id, data):
             return
         
-        # Emit D-Bus signal on all matching registration paths (per-application)
+        # Step 2: Check if there is an existing enabled relay switch for this MAC
+        device_id = f"mac_{mac.replace(':', '').lower()}"
+        device_exists = device_id in self.discovered_devices
+        device_enabled = device_exists and self.discovered_devices[device_id]['enabled']
+        
+        if device_enabled:
+            # Step 3a: Device exists and is enabled -> route it
+            self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+            return
+        
+        if not device_exists:
+            # Step 3b: Device doesn't exist -> check if discovery is enabled
+            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State'] == 1
+            if discovery_enabled:
+                # Create an enabled switch for this MAC and then route it
+                device_name = self.device_names.get(mac, "")
+                
+                # Format: "Name (MAC)" or just "MAC" if no name yet
+                if device_name:
+                    display_name = f"{device_name} ({mac})"
+                else:
+                    # No name yet - will be updated when we learn it
+                    display_name = mac
+                
+                self._add_discovered_device(device_id, display_name, "mac")
+                # Route the advertisement
+                self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+            # else: discovery disabled, device doesn't exist -> return (do nothing)
+        # else: device exists but is disabled -> return (do nothing)
+    
+    def _emit_advertisement(self, mac: str, mfg_id: int, data: bytes, rssi: int, interface: str):
+        """Emit D-Bus signals for an advertisement to all matching registration paths"""
         try:
             # Get device name from cache (or empty string if unknown)
             device_name = self.device_names.get(mac, "")
@@ -596,6 +1080,11 @@ class BLEAdvertisementRouter:
             self.process_btmon_output
         )
         logging.info("btmon output handler registered")
+        
+        # Do initial service scan NOW (before main loop starts)
+        # This is synchronous but should be fast with the optimized scan
+        logging.info("Running initial service scan...")
+        self._scan_existing_services()
         
         mainloop = GLib.MainLoop()
         logging.info("Router service running...")

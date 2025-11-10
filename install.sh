@@ -60,7 +60,46 @@ fi
 chmod +x "$INSTALL_DIR/dbus-ble-advertisements.py"
 chmod +x "$INSTALL_DIR/service/run"
 chmod +x "$INSTALL_DIR/service/log/run"
+chmod +x "$INSTALL_DIR/install-ui-overlay.py"
 echo "✓ Made scripts executable"
+
+# Install UI overlay
+echo ""
+echo "Installing UI overlay..."
+if python3 "$INSTALL_DIR/install-ui-overlay.py"; then
+    echo "✓ UI overlay installed"
+    
+    # Add to overlay-fs config if not already there
+    OVERLAY_CONF="/data/apps/overlay-fs/overlay-fs.conf"
+    if [ -f "$OVERLAY_CONF" ]; then
+        if ! grep -q "/opt/victronenergy/gui dbus-ble-advertisements" "$OVERLAY_CONF"; then
+            echo "/opt/victronenergy/gui dbus-ble-advertisements" >> "$OVERLAY_CONF"
+            echo "✓ Added GUI v1 to overlay-fs config"
+        else
+            echo "✓ GUI v1 already in overlay-fs config"
+        fi
+        
+        if ! grep -q "/opt/victronenergy/gui-v2 dbus-ble-advertisements" "$OVERLAY_CONF"; then
+            echo "/opt/victronenergy/gui-v2 dbus-ble-advertisements" >> "$OVERLAY_CONF"
+            echo "✓ Added GUI v2 to overlay-fs config"
+        else
+            echo "✓ GUI v2 already in overlay-fs config"
+        fi
+        
+        # Enable the overlay
+        if [ -x "/data/apps/overlay-fs/enable.sh" ]; then
+            /data/apps/overlay-fs/enable.sh >/dev/null 2>&1
+            echo "✓ Overlay enabled"
+            GUI_RESTART_NEEDED=true
+        fi
+    else
+        echo "⚠ overlay-fs not found - UI overlay will not be active"
+        GUI_RESTART_NEEDED=false
+    fi
+else
+    echo "⚠ UI overlay installation failed (service will still work without UI)"
+    GUI_RESTART_NEEDED=false
+fi
 
 # Set up service link if not present
 if [ -L "$SERVICE_LINK" ]; then
@@ -111,10 +150,16 @@ if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop
     # Try to get version
     VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.ble.advertisements /ble_advertisements com.victronenergy.ble.Advertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
     echo "✓ Service version: $VERSION"
+echo ""
+echo "========================================"
+echo "Installation successful!"
+echo "========================================"
+echo ""
+if [ "$GUI_RESTART_NEEDED" = true ]; then
+    echo "⚠ GUI restart required to see UI changes"
+    echo "  Run: svc -t /service/gui"
     echo ""
-    echo "========================================"
-    echo "Installation successful!"
-    echo "========================================"
+fi
 else
     echo "⚠ Service not yet registered on D-Bus (may still be starting up)"
     echo ""
