@@ -203,6 +203,9 @@ class BLEAdvertisementRouter:
     def __init__(self, bus):
         self.bus = bus
         
+        # Create a BusName for the emitters to use
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_router', bus)
+        
         # Import VeDbusService for creating a proper Venus OS device
         sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'ext', 'velib_python'))
         from vedbus import VeDbusService
@@ -354,6 +357,11 @@ class BLEAdvertisementRouter:
                 # Update Status to match State (0x00 = off, 0x09 = on)
                 self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if value == 1 else 0x00
                 
+                # If device is disabled, immediately hide it from the UI
+                if value == 0:
+                    self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Settings/ShowUIControl'] = 0
+                    logging.info(f"Hidden '{device_name}' from switches pane (disabled)")
+                
                 # Persist the change
                 self._save_discovered_devices()
                 return True
@@ -378,25 +386,30 @@ class BLEAdvertisementRouter:
         self.dbusservice['/SwitchableOutput/relay_1/Status'] = 0x09 if enabled else 0x00
         
         if enabled:
-            # Discovery enabled: make main toggle and all device toggles visible
-            logging.info("Discovery enabled - making all switches visible")
+            # Discovery enabled: only show device toggles that are still enabled
+            logging.info("Discovery enabled - showing enabled device switches")
             self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 1
             
-            # Make all discovered device toggles visible
+            # Only make enabled device toggles visible
             for device_id, device_info in self.discovered_devices.items():
-                output_idx = device_info['output_idx']
-                output_path = f'/SwitchableOutput/relay_{output_idx}'
-                self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 1
-                logging.info(f"Made {device_info['name']} visible in switches pane")
+                relay_id = device_info['relay_id']
+                output_path = f'/SwitchableOutput/relay_{relay_id}'
+                
+                # Only show if device is enabled
+                if device_info.get('enabled', True):
+                    self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 1
+                    logging.info(f"Made {device_info['name']} visible in switches pane")
+                else:
+                    logging.info(f"Keeping {device_info['name']} hidden (disabled)")
         else:
-            # Discovery disabled: hide main toggle and all device toggles
-            logging.info("Discovery disabled - hiding all switches")
+            # Discovery disabled: hide all device toggles
+            logging.info("Discovery disabled - hiding all device switches")
             self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 0
             
             # Hide all discovered device toggles
             for device_id, device_info in self.discovered_devices.items():
-                output_idx = device_info['output_idx']
-                output_path = f'/SwitchableOutput/relay_{output_idx}'
+                relay_id = device_info['relay_id']
+                output_path = f'/SwitchableOutput/relay_{relay_id}'
                 self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
                 logging.info(f"Hidden {device_info['name']} from switches pane")
         
@@ -465,7 +478,15 @@ class BLEAdvertisementRouter:
             logging.error(f"Failed to load discovered devices: {e}", exc_info=True)
     
     def _update_device_name_if_exists(self, mac: str, name: str):
-        """Update the toggle name for a device if it's already been discovered"""
+        """Update the toggle name for a device if it's already been discovered
+        
+        Only updates if discovery mode is enabled - no need to update names when not discovering.
+        """
+        # Skip if discovery is disabled - no need to update UI elements
+        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State'] == 1
+        if not discovery_enabled:
+            return
+        
         device_id = f"mac_{mac.replace(':', '').lower()}"
         if device_id in self.discovered_devices:
             device_info = self.discovered_devices[device_id]
@@ -485,6 +506,18 @@ class BLEAdvertisementRouter:
             self._save_discovered_devices()
             
             logging.info(f"Updated device name: {new_name}")
+    
+    def _get_service_names_for_mac(self, mac: str) -> list:
+        """Get list of service names that are registered for this MAC address"""
+        services = set()
+        if mac in self.mac_registrations:
+            for path in self.mac_registrations[mac]:
+                # Path format: /ble_advertisements/{service_name}/addr/{mac}
+                parts = path.split('/')
+                if len(parts) >= 3:
+                    service_name = parts[2]  # Extract service name
+                    services.add(service_name)
+        return sorted(list(services))
     
     def _add_discovered_device(self, device_id: str, name: str, device_type: str):
         """
@@ -752,11 +785,16 @@ class BLEAdvertisementRouter:
         for paths in self.mac_registrations.values():
             active_paths.update(paths)
         
+        logging.info(f"_update_emitters: {len(active_paths)} active paths, {len(self.emitters)} existing emitters")
+        
         # Create emitters for new paths
         for path in active_paths:
             if path not in self.emitters:
-                self.emitters[path] = AdvertisementEmitter(self.bus_name, path)
-                logging.debug(f"Created emitter for {path}")
+                try:
+                    self.emitters[path] = AdvertisementEmitter(self.bus_name, path)
+                    logging.info(f"Created emitter for {path}")
+                except Exception as e:
+                    logging.error(f"Failed to create emitter for {path}: {e}", exc_info=True)
         
         # Remove emitters for paths that are no longer registered
         for path in list(self.emitters.keys()):
@@ -961,6 +999,15 @@ class BLEAdvertisementRouter:
         device_exists = device_id in self.discovered_devices
         device_enabled = device_exists and self.discovered_devices[device_id]['enabled']
         
+        # Debug logging for first few advertisements
+        if not hasattr(self, '_debug_count'):
+            self._debug_count = {}
+        if mac not in self._debug_count:
+            self._debug_count[mac] = 0
+        if self._debug_count[mac] < 2:
+            self._debug_count[mac] += 1
+            logging.info(f"DEBUG: {mac} - exists={device_exists}, enabled={device_enabled}, has_reg={has_registration}")
+        
         if device_enabled:
             # Step 3a: Device exists and is enabled -> route it
             self._emit_advertisement(mac, mfg_id, data, rssi, interface)
@@ -973,12 +1020,19 @@ class BLEAdvertisementRouter:
                 # Create an enabled switch for this MAC and then route it
                 device_name = self.device_names.get(mac, "")
                 
-                # Format: "Name (MAC)" or just "MAC" if no name yet
+                # Format: "Name (MAC)" or "service1, service2: MAC" if no name yet
                 if device_name:
                     display_name = f"{device_name} ({mac})"
                 else:
-                    # No name yet - will be updated when we learn it
-                    display_name = mac
+                    # No Bluetooth name yet - show which services are listening for this MAC
+                    service_names = self._get_service_names_for_mac(mac)
+                    if service_names:
+                        services_str = ", ".join(service_names)
+                        display_name = f"{services_str}: {mac}"
+                        logging.info(f"Creating device with service name prefix: {display_name}")
+                    else:
+                        display_name = mac
+                        logging.info(f"Creating device with MAC only (no services registered): {display_name}")
                 
                 self._add_discovered_device(device_id, display_name, "mac")
                 # Route the advertisement
@@ -1015,6 +1069,12 @@ class BLEAdvertisementRouter:
                     if path in self.emitters:
                         self.emitters[path].Advertisement(mac_dbus, mfg_id_dbus, data_array, rssi_dbus, interface_dbus, name_dbus)
                         emitted_count += 1
+                    else:
+                        if not hasattr(self, '_missing_emitter_logged'):
+                            self._missing_emitter_logged = set()
+                        if path not in self._missing_emitter_logged:
+                            self._missing_emitter_logged.add(path)
+                            logging.warning(f"No emitter for registered path: {path}")
             
             if emitted_count > 0:
                 name_str = f" name='{device_name}'" if device_name else ""

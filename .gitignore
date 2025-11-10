@@ -24,3 +24,5 @@ test_*.py
 *_test.py
 analyze_*.py
 
+copy-dbus-documentation.md
+install-ui-overlay.py
