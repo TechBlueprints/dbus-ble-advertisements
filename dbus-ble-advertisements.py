@@ -232,7 +232,7 @@ class BLEAdvertisementRouter:
         # Create a single switchable output for new device discovery toggle
         # Use relay_1 identifier - matching RemoteGPIO and GX IO Extender relay pattern
         output_path = '/SwitchableOutput/relay_1'
-        self.dbusservice.add_path(f'{output_path}/Name', 'BLE Router New Device Discovery')
+        self.dbusservice.add_path(f'{output_path}/Name', '* BLE Router New Device Discovery')
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle (at output level for GUI rendering)
         self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
                                    onchangecallback=self._on_discovery_changed)
