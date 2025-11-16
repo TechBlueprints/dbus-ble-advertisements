@@ -103,7 +103,7 @@ fi
 
 # Add to rc.local to persist across reboots
 RC_LOCAL="/data/rc.local"
-RC_ENTRY="bash $INSTALL_DIR/install-reboot.sh > $INSTALL_DIR/startup.log 2>&1 &"
+RC_ENTRY="ln -sf $INSTALL_DIR/service /service/dbus-ble-advertisements"
 
 if [ ! -f "$RC_LOCAL" ]; then
     echo "Creating /data/rc.local..."
@@ -133,7 +133,7 @@ if [ -L "$SERVICE_LINK" ]; then
     fi
 else
     echo "Creating service link..."
-    ln -s "$INSTALL_DIR/service" "$SERVICE_LINK"
+    ln -sf "$INSTALL_DIR/service" "$SERVICE_LINK"
     echo "✓ Service link created"
     RESTART_NEEDED=true
 fi
