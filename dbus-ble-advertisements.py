@@ -51,7 +51,7 @@ DEVICES_CONFIG_FILE = "/data/apps/dbus-ble-advertisements/devices.json"
 class AdvertisementEmitter(dbus.service.Object):
     """D-Bus object that emits signals for a specific manufacturer or MAC"""
     
-    @dbus.service.signal(dbus_interface='com.techblueprints.BleAdvertisements',
+    @dbus.service.signal(dbus_interface='com.techblueprints.ble.Advertisements',
                          signature='sqaynss')
     def Advertisement(self, mac, manufacturer_id, data, rssi, interface, name):
         """Signal emitted when a matching BLE advertisement is received
@@ -74,13 +74,13 @@ class RootObject(dbus.service.Object):
         dbus.service.Object.__init__(self, bus_name, '/ble_advertisements')
         self.heartbeat = time.time()
     
-    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
                          in_signature='', out_signature='s')
     def GetVersion(self):
         """Return service version"""
         return "1.0.0"
     
-    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
                          in_signature='', out_signature='s')
     def GetStatus(self):
         """Return service status based on heartbeat"""
@@ -90,7 +90,7 @@ class RootObject(dbus.service.Object):
         else:
             return "stale"
     
-    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
                          in_signature='', out_signature='d')
     def GetHeartbeat(self):
         """Return last heartbeat timestamp"""
@@ -204,7 +204,10 @@ class BLEAdvertisementRouter:
         self.bus = bus
         
         # Create a BusName for the emitters to use
-        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_advertisements', bus)
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble.advertisements', bus)
+        
+        # Create root object to provide GetVersion, GetStatus, GetHeartbeat methods
+        self.root_obj = RootObject(self.bus_name)
         
         # Import VeDbusService for creating a proper Venus OS device
         sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'ext', 'velib_python'))
@@ -212,7 +215,7 @@ class BLEAdvertisementRouter:
         from settingsdevice import SettingsDevice
         
         # Create as a switch device so it appears in the device list with settings
-        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_advertisements', bus, register=False)
+        self.dbusservice = VeDbusService('com.victronenergy.switch.ble.advertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -901,7 +904,7 @@ class BLEAdvertisementRouter:
         
         return False
     
-    @dbus.service.signal(dbus_interface='com.techblueprints.BleAdvertisements',
+    @dbus.service.signal(dbus_interface='com.techblueprints.ble.Advertisements',
                          signature='sqayn')
     def Advertisement(self, mac, manufacturer_id, data, rssi):
         """

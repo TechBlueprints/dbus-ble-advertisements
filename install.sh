@@ -103,7 +103,7 @@ fi
 
 # Add to rc.local to persist across reboots
 RC_LOCAL="/data/rc.local"
-RC_ENTRY="bash $INSTALL_DIR/install.sh > $INSTALL_DIR/startup.log 2>&1 &"
+RC_ENTRY="bash $INSTALL_DIR/install-reboot.sh > $INSTALL_DIR/startup.log 2>&1 &"
 
 if [ ! -f "$RC_LOCAL" ]; then
     echo "Creating /data/rc.local..."
@@ -162,11 +162,11 @@ echo ""
 echo "Verifying installation..."
 sleep 2
 
-if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null | grep -q "com.victronenergy.switch.ble_advertisements"; then
+if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null | grep -q "com.victronenergy.switch.ble.advertisements"; then
     echo "✓ Service registered on D-Bus"
     
     # Try to get version
-    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.switch.ble_advertisements /ble_advertisements com.techblueprints.BleAdvertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
+    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.switch.ble.advertisements /ble_advertisements com.techblueprints.ble.Advertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
     echo "✓ Service version: $VERSION"
 echo ""
 echo "========================================"

@@ -60,7 +60,7 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ### Service Name
 
-**`com.victronenergy.switch.ble_advertisements`**
+**`com.victronenergy.switch.ble.advertisements`**
 - Service for BLE advertisement routing and UI integration
 - **Use this for service availability checks**
 - Appears in Venus OS device list
@@ -71,7 +71,7 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ### Signal
 ```
-Interface: com.techblueprints.BleAdvertisements
+Interface: com.techblueprints.ble.Advertisements
 Signal: Advertisement(string mac, uint16 manufacturer_id, array of bytes data, int16 rssi, string interface, string name)
 ```
 
@@ -158,7 +158,7 @@ def advertisement_callback(mac, mfg_id, data, rssi, interface, name):
 bus.add_signal_receiver(
     advertisement_callback,
     signal_name='Advertisement',
-    dbus_interface='com.techblueprints.BleAdvertisements',
+    dbus_interface='com.techblueprints.ble.Advertisements',
     path='/ble-advertisements/orion-tr/mfgr/737'  # Same path as registration!
 )
 
