@@ -67,9 +67,10 @@ The router registers two D-Bus service names:
    - **Use this for service availability checks**
    - Appears in Venus OS device list
 
-2. **`com.victronenergy.ble`** (Legacy)
+2. **`com.victronenergy.ble`**
    - Used for UI device publishing (Bluetooth Sensors page)
-   - Not guaranteed to exist if dbus-ble-sensors isn't running
+   - Only exists if dbus-ble-sensors is running
+   - Not reliable for availability checks
 
 **⚠️ Important**: Always check for `com.victronenergy.switch.ble_router` when verifying the router is available.
 
