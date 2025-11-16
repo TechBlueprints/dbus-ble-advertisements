@@ -607,7 +607,7 @@ class BLEAdvertisementRouter:
             # Only check likely client services (not system services)
             # Note: Some services register with custom names (e.g., orion_tr, seelevel) before creating device services
             likely_clients = ['com.victronenergy.tank.', 'com.victronenergy.charger.', 'com.victronenergy.dcdc.', 
-                              'com.victronenergy.orion_tr', 'com.victronenergy.seelevel']
+                              'com.victronenergy.switch.orion_tr', 'com.victronenergy.switch.seelevel_monitor']
             victron_services = [s for s in service_names 
                                 if isinstance(s, str) and 
                                 any(s.startswith(prefix) if prefix.endswith('.') else s == prefix for prefix in likely_clients)]
