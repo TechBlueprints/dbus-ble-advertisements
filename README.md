@@ -60,8 +60,8 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ### Service Name
 
-**`com.victronenergy.switch.ble_router`**
-- Main service for device registration and UI integration
+**`com.victronenergy.switch.ble_advertisements`**
+- Service for BLE advertisement routing and UI integration
 - **Use this for service availability checks**
 - Appears in Venus OS device list
 

@@ -204,7 +204,7 @@ class BLEAdvertisementRouter:
         self.bus = bus
         
         # Create a BusName for the emitters to use
-        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_router', bus)
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_advertisements', bus)
         
         # Import VeDbusService for creating a proper Venus OS device
         sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'ext', 'velib_python'))
@@ -212,7 +212,7 @@ class BLEAdvertisementRouter:
         from settingsdevice import SettingsDevice
         
         # Create as a switch device so it appears in the device list with settings
-        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_router', bus, register=False)
+        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_advertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -259,13 +259,13 @@ class BLEAdvertisementRouter:
         # Register device in settings (for GUI device list)
         settings = {
             "ClassAndVrmInstance": [
-                "/Settings/Devices/ble_router/ClassAndVrmInstance",
+                "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
                 "switch:50",
                 0,
                 0,
             ],
             "DiscoveryEnabled": [
-                "/Settings/Devices/ble_router/DiscoveryEnabled",
+                "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
                 0,  # Default: OFF
                 0,
                 1,
