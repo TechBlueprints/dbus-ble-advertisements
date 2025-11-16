@@ -58,21 +58,12 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ## D-Bus Interface
 
-### Service Names
+### Service Name
 
-The router registers two D-Bus service names:
-
-1. **`com.victronenergy.switch.ble_router`** (Primary)
-   - Main service for device registration and UI integration
-   - **Use this for service availability checks**
-   - Appears in Venus OS device list
-
-2. **`com.victronenergy.ble`**
-   - Used for UI device publishing (Bluetooth Sensors page)
-   - Only exists if dbus-ble-sensors is running
-   - Not reliable for availability checks
-
-**⚠️ Important**: Always check for `com.victronenergy.switch.ble_router` when verifying the router is available.
+**`com.victronenergy.switch.ble_router`**
+- Main service for device registration and UI integration
+- **Use this for service availability checks**
+- Appears in Venus OS device list
 
 ### Paths
 - **Main**: `/ble_advertisements`
