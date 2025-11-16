@@ -58,9 +58,24 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ## D-Bus Interface
 
-### Service
-- **Name**: `com.victronenergy.ble.advertisements`
-- **Path**: `/Advertisements`
+### Service Names
+
+The router registers two D-Bus service names:
+
+1. **`com.victronenergy.switch.ble_router`** (Primary)
+   - Main service for device registration and UI integration
+   - **Use this for service availability checks**
+   - Appears in Venus OS device list
+
+2. **`com.victronenergy.ble`** (Legacy)
+   - Used for UI device publishing (Bluetooth Sensors page)
+   - Not guaranteed to exist if dbus-ble-sensors isn't running
+
+**⚠️ Important**: Always check for `com.victronenergy.switch.ble_router` when verifying the router is available.
+
+### Paths
+- **Main**: `/ble_advertisements`
+- **Registration**: `/ble_advertisements/{service_name}/mfgr/{id}` or `/ble_advertisements/{service_name}/addr/{mac}`
 
 ### Signal
 ```
