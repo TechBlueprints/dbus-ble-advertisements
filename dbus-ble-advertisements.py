@@ -604,15 +604,14 @@ class BLEAdvertisementRouter:
             bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
             service_names = bus_iface.ListNames()
             
-            # Only check likely client services (not system services)
-            # Note: Some services register with custom names (e.g., orion_tr, seelevel) before creating device services
-            likely_clients = ['com.victronenergy.tank.', 'com.victronenergy.charger.', 'com.victronenergy.dcdc.', 
-                              'com.victronenergy.orion_tr', 'com.victronenergy.switch.seelevel_monitor']
+            # Check all com.victronenergy.* services (no hardcoded filter)
+            # Any service can register by creating /ble_advertisements/{service}/mfgr/{id} paths
             victron_services = [s for s in service_names 
                                 if isinstance(s, str) and 
-                                any(s.startswith(prefix) if prefix.endswith('.') else s == prefix for prefix in likely_clients)]
+                                s.startswith('com.victronenergy.') and 
+                                not s.startswith(':')]
             
-            logging.info(f"Found {len(victron_services)} likely client services to check: {victron_services}")
+            logging.info(f"Found {len(victron_services)} Victron services to check: {victron_services}")
             
             checked = 0
             for service_name in victron_services:
