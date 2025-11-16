@@ -39,18 +39,43 @@ Multiple BLE scanners (using `bleak` or similar libraries) cannot coexist on Ven
 
 ## Installation
 
+### Recommended: Automated Installation
+
+```bash
+# Clone repository
+git clone https://github.com/TechBlueprints/dbus-ble-advertisements.git
+cd dbus-ble-advertisements
+
+# Copy to Cerbo and run installer
+scp -r * root@cerbo:/data/apps/dbus-ble-advertisements/
+ssh root@cerbo 'cd /data/apps/dbus-ble-advertisements && bash install.sh'
+```
+
+The installer will:
+- Set up the service directory structure
+- Create service symlink for auto-start
+- Configure persistence across reboots via `/data/rc.local`
+- Verify the service is running
+
+### Manual Installation
+
+If you prefer manual installation:
+
 ```bash
 # Create directory on Cerbo
 ssh root@cerbo 'mkdir -p /data/apps/dbus-ble-advertisements'
 
 # Copy files to Cerbo
-scp -r dbus-ble-advertisements.py service root@cerbo:/data/apps/dbus-ble-advertisements/
+scp -r dbus-ble-advertisements.py service install-reboot.sh root@cerbo:/data/apps/dbus-ble-advertisements/
 
 # Make scripts executable
-ssh root@cerbo 'chmod +x /data/apps/dbus-ble-advertisements/dbus-ble-advertisements.py /data/apps/dbus-ble-advertisements/service/run /data/apps/dbus-ble-advertisements/service/log/run'
+ssh root@cerbo 'chmod +x /data/apps/dbus-ble-advertisements/dbus-ble-advertisements.py /data/apps/dbus-ble-advertisements/service/run /data/apps/dbus-ble-advertisements/service/log/run /data/apps/dbus-ble-advertisements/install-reboot.sh'
 
 # Link service (will auto-start)
 ssh root@cerbo 'ln -sf /data/apps/dbus-ble-advertisements/service /service/dbus-ble-advertisements'
+
+# Add to rc.local for persistence across reboots
+ssh root@cerbo "echo 'bash /data/apps/dbus-ble-advertisements/install-reboot.sh > /data/apps/dbus-ble-advertisements/startup.log 2>&1 &' >> /data/rc.local"
 
 # Verify running
 ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
