@@ -209,6 +209,40 @@ mainloop.run()
 - If both manufacturer ID and MAC registered: broadcasts only if BOTH match
 - If only MACs registered: broadcasts only those specific devices
 
+## Configuration
+
+### Device Discovery
+
+The BLE Router automatically discovers BLE devices and creates switchable controls for them in the Venus OS UI.
+
+![BLE Router Switches](screenshots/ble-router-switches.png)
+
+*The BLE Router switches screen showing the discovery toggle and discovered devices. Each device can be individually enabled or disabled.*
+
+**Key features:**
+- **BLE Router New Device Discovery** - Toggle to enable/disable automatic device discovery
+- **Discovered Devices** - Each discovered device gets its own enable/disable toggle with MAC address
+- **Active Indication** - The asterisk (*) indicates the discovery toggle is currently visible in the UI
+
+### How to Re-enable Discovery
+
+By default, the "BLE Router New Device Discovery" toggle may be hidden to reduce UI clutter after initial setup. To re-enable it:
+
+1. Navigate to **Settings → Switches → BLE Router**
+2. Tap the **gear/settings icon** on the "BLE Router New Device Discovery" switch
+3. Enable **"Show controls"**
+
+![BLE Router Show Controls Setting](screenshots/ble-router-show-controls-setting.png)
+
+*The settings page for the discovery toggle. Enable "Show controls" to make the discovery toggle visible in the main switches screen.*
+
+Once enabled, the discovery toggle will appear with an asterisk (*) in the main switches screen, allowing you to:
+- Turn on discovery to detect new BLE devices
+- Turn off discovery when you're done to save battery/resources
+- Re-enable it anytime you need to add new devices
+
+**Note:** This same process applies to other switch-based services like SmartShunt Aggregator and SeeLevel Sensor Control.
+
 ## Service Management
 
 ```bash
