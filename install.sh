@@ -101,6 +101,24 @@ else
     GUI_RESTART_NEEDED=false
 fi
 
+# Add to rc.local to persist across reboots
+RC_LOCAL="/data/rc.local"
+RC_ENTRY="bash $INSTALL_DIR/install.sh > $INSTALL_DIR/startup.log 2>&1 &"
+
+if [ ! -f "$RC_LOCAL" ]; then
+    echo "Creating /data/rc.local..."
+    echo "#!/bin/bash" > "$RC_LOCAL"
+    chmod 755 "$RC_LOCAL"
+fi
+
+if ! grep -qF "$RC_ENTRY" "$RC_LOCAL"; then
+    echo "Adding service to rc.local for persistence across reboots..."
+    echo "$RC_ENTRY" >> "$RC_LOCAL"
+    echo "✓ Added to rc.local"
+else
+    echo "✓ Already in rc.local"
+fi
+
 # Set up service link if not present
 if [ -L "$SERVICE_LINK" ]; then
     echo "Service link already exists"
