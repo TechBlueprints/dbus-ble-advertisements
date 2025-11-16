@@ -5,6 +5,11 @@ __pycache__/
 *.so
 .Python
 
+# Virtual environments
+venv/
+env/
+ENV/
+
 # IDE
 .vscode/
 .idea/
@@ -19,10 +24,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Test/analysis files
-test_*.py
-*_test.py
-analyze_*.py
-
-copy-dbus-documentation.md
-install-ui-overlay.py
+# Local runtime data
+devices.json
+startup.log
