@@ -71,7 +71,8 @@ ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
 
 ### Signal
 ```
-Advertisement(string mac, uint16 manufacturer_id, array of bytes data, int16 rssi, string interface, string name)
+Interface: com.techblueprints.BleAdvertisements
+Signal: Advertisement(string mac, uint16 manufacturer_id, array of bytes data, int16 rssi, string interface, string name)
 ```
 
 Emitted when a BLE advertisement matching configured filters is received.
@@ -157,7 +158,7 @@ def advertisement_callback(mac, mfg_id, data, rssi, interface, name):
 bus.add_signal_receiver(
     advertisement_callback,
     signal_name='Advertisement',
-    dbus_interface='com.victronenergy.ble.Advertisements',
+    dbus_interface='com.techblueprints.BleAdvertisements',
     path='/ble-advertisements/orion-tr/mfgr/737'  # Same path as registration!
 )
 

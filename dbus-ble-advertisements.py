@@ -51,7 +51,7 @@ DEVICES_CONFIG_FILE = "/data/apps/dbus-ble-advertisements/devices.json"
 class AdvertisementEmitter(dbus.service.Object):
     """D-Bus object that emits signals for a specific manufacturer or MAC"""
     
-    @dbus.service.signal(dbus_interface='com.victronenergy.ble.Advertisements',
+    @dbus.service.signal(dbus_interface='com.techblueprints.BleAdvertisements',
                          signature='sqaynss')
     def Advertisement(self, mac, manufacturer_id, data, rssi, interface, name):
         """Signal emitted when a matching BLE advertisement is received
@@ -74,13 +74,13 @@ class RootObject(dbus.service.Object):
         dbus.service.Object.__init__(self, bus_name, '/ble_advertisements')
         self.heartbeat = time.time()
     
-    @dbus.service.method(dbus_interface='com.victronenergy.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
                          in_signature='', out_signature='s')
     def GetVersion(self):
         """Return service version"""
         return "1.0.0"
     
-    @dbus.service.method(dbus_interface='com.victronenergy.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
                          in_signature='', out_signature='s')
     def GetStatus(self):
         """Return service status based on heartbeat"""
@@ -90,7 +90,7 @@ class RootObject(dbus.service.Object):
         else:
             return "stale"
     
-    @dbus.service.method(dbus_interface='com.victronenergy.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.techblueprints.BleAdvertisements',
                          in_signature='', out_signature='d')
     def GetHeartbeat(self):
         """Return last heartbeat timestamp"""
@@ -901,7 +901,7 @@ class BLEAdvertisementRouter:
         
         return False
     
-    @dbus.service.signal(dbus_interface='com.victronenergy.ble.Advertisements',
+    @dbus.service.signal(dbus_interface='com.techblueprints.BleAdvertisements',
                          signature='sqayn')
     def Advertisement(self, mac, manufacturer_id, data, rssi):
         """
