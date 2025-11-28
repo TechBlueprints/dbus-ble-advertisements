@@ -133,6 +133,17 @@ echo "========================================"
 echo "Installation Complete!"
 echo "========================================"
 echo ""
+
+# Check if discovery is enabled
+DISCOVERY_STATE=$(dbus -y com.victronenergy.switch.ble.advertisements /ble_advertisements/relay_0/State GetValue 2>/dev/null || echo "0")
+if [ "$DISCOVERY_STATE" = "0" ]; then
+    echo "⚠️  WARNING: BLE Router discovery is currently DISABLED"
+    echo ""
+    echo "To discover new BLE devices, you need to enable discovery."
+    echo "See: https://github.com/TechBlueprints/dbus-ble-advertisements#switches-not-visible"
+    echo ""
+fi
+
 echo "Service status:"
 svstat "/service/$SERVICE_NAME"
 echo ""
