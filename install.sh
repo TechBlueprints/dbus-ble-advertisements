@@ -1,0 +1,124 @@
+#!/bin/bash
+#
+# Remote installer for dbus-ble-advertisements on Venus OS
+# 
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
+#   wget -qO- https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
+#
+
+set -e
+
+REPO_URL="https://github.com/TechBlueprints/dbus-ble-advertisements.git"
+INSTALL_DIR="/data/apps/dbus-ble-advertisements"
+SERVICE_NAME="dbus-ble-advertisements"
+
+echo "========================================"
+echo "BLE Advertisements Router Installer"
+echo "========================================"
+echo ""
+
+# Check if running on Venus OS
+if [ ! -d "/data/apps" ]; then
+    echo "Error: /data/apps not found. This script must run on Venus OS."
+    exit 1
+fi
+
+# Step 1: Ensure git is installed
+echo "Step 1: Checking for git..."
+if ! command -v git >/dev/null 2>&1; then
+    echo "Git not found. Installing git..."
+    if ! opkg install git; then
+        echo "Error: Failed to install git."
+        exit 1
+    fi
+    echo "✓ Git installed successfully"
+else
+    echo "✓ Git already installed"
+fi
+echo ""
+
+# Step 2: Clone or update repository
+echo "Step 2: Setting up repository..."
+cd /data/apps
+
+if [ -d "$INSTALL_DIR" ]; then
+    echo "Directory exists: $INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    
+    # Check if it's already a git repository
+    if [ -d .git ]; then
+        echo "Already a git repository. Pulling latest changes..."
+        git pull
+        echo "✓ Repository updated"
+    else
+        echo "Not a git repository. Converting to git repository..."
+        
+        # Initialize as git repo
+        git init
+        
+        # Add to safe directories (ownership consideration)
+        git config --global --add safe.directory "$INSTALL_DIR"
+        
+        # Add remote
+        git remote add origin "$REPO_URL"
+        
+        # Fetch and reset to main
+        git fetch origin
+        git checkout -b main
+        git reset --hard origin/main
+        git branch --set-upstream-to=origin/main main
+        
+        echo "✓ Converted to git repository and updated to latest"
+    fi
+else
+    echo "Directory does not exist. Cloning repository..."
+    git clone "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    
+    # Add to safe directories
+    git config --global --add safe.directory "$INSTALL_DIR"
+    
+    echo "✓ Repository cloned"
+fi
+echo ""
+
+# Step 3: Install or restart service
+echo "Step 3: Installing/updating service..."
+
+# Check if service is already running
+if [ -L "/service/$SERVICE_NAME" ] && svstat "/service/$SERVICE_NAME" 2>/dev/null | grep -q "up"; then
+    echo "Service is already installed and running."
+    echo "Restarting service to apply updates..."
+    svc -t "/service/$SERVICE_NAME"
+    sleep 2
+    
+    # Verify it restarted
+    if svstat "/service/$SERVICE_NAME" 2>/dev/null | grep -q "up"; then
+        echo "✓ Service restarted successfully"
+    else
+        echo "Warning: Service may not have restarted properly. Check logs:"
+        echo "  tail -f /var/log/$SERVICE_NAME/current"
+    fi
+else
+    echo "Service not installed or not running. Running installation..."
+    bash "$INSTALL_DIR/install-service.sh"
+fi
+echo ""
+
+echo "========================================"
+echo "Installation Complete!"
+echo "========================================"
+echo ""
+echo "Service status:"
+svstat "/service/$SERVICE_NAME"
+echo ""
+echo "View logs:"
+echo "  tail -f /var/log/$SERVICE_NAME/current"
+echo ""
+echo "Service management:"
+echo "  svc -u /service/$SERVICE_NAME  # Start"
+echo "  svc -d /service/$SERVICE_NAME  # Stop"
+echo "  svc -t /service/$SERVICE_NAME  # Restart"
+echo ""
+
