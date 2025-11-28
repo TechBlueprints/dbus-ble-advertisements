@@ -42,15 +42,31 @@ echo ""
 echo "Step 2: Setting up repository..."
 cd /data/apps
 
+NEEDS_RESTART=false
+
 if [ -d "$INSTALL_DIR" ]; then
     echo "Directory exists: $INSTALL_DIR"
     cd "$INSTALL_DIR"
     
     # Check if it's already a git repository
     if [ -d .git ]; then
-        echo "Already a git repository. Pulling latest changes..."
-        git pull
-        echo "✓ Repository updated"
+        echo "Already a git repository. Checking for updates..."
+        
+        # Fetch latest changes
+        git fetch origin
+        
+        # Check if there are differences
+        LOCAL=$(git rev-parse HEAD)
+        REMOTE=$(git rev-parse origin/main)
+        
+        if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "Updates available. Pulling latest changes..."
+            git pull
+            NEEDS_RESTART=true
+            echo "✓ Repository updated"
+        else
+            echo "✓ Already up to date"
+        fi
     else
         echo "Not a git repository. Converting to git repository..."
         
@@ -69,6 +85,7 @@ if [ -d "$INSTALL_DIR" ]; then
         git reset --hard origin/main
         git branch --set-upstream-to=origin/main main
         
+        NEEDS_RESTART=true
         echo "✓ Converted to git repository and updated to latest"
     fi
 else
@@ -79,6 +96,7 @@ else
     # Add to safe directories
     git config --global --add safe.directory "$INSTALL_DIR"
     
+    NEEDS_RESTART=false  # New install, not a restart
     echo "✓ Repository cloned"
 fi
 echo ""
@@ -88,17 +106,22 @@ echo "Step 3: Installing/updating service..."
 
 # Check if service is already running
 if [ -L "/service/$SERVICE_NAME" ] && svstat "/service/$SERVICE_NAME" 2>/dev/null | grep -q "up"; then
-    echo "Service is already installed and running."
-    echo "Restarting service to apply updates..."
-    svc -t "/service/$SERVICE_NAME"
-    sleep 2
-    
-    # Verify it restarted
-    if svstat "/service/$SERVICE_NAME" 2>/dev/null | grep -q "up"; then
-        echo "✓ Service restarted successfully"
+    if [ "$NEEDS_RESTART" = true ]; then
+        echo "Service is already installed and running."
+        echo "Updates detected. Restarting service..."
+        svc -t "/service/$SERVICE_NAME"
+        sleep 2
+        
+        # Verify it restarted
+        if svstat "/service/$SERVICE_NAME" 2>/dev/null | grep -q "up"; then
+            echo "✓ Service restarted successfully"
+        else
+            echo "Warning: Service may not have restarted properly. Check logs:"
+            echo "  tail -f /var/log/$SERVICE_NAME/current"
+        fi
     else
-        echo "Warning: Service may not have restarted properly. Check logs:"
-        echo "  tail -f /var/log/$SERVICE_NAME/current"
+        echo "Service is already installed and running."
+        echo "✓ No updates needed"
     fi
 else
     echo "Service not installed or not running. Running installation..."
