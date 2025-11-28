@@ -215,6 +215,18 @@ mainloop.run()
 
 The BLE Router automatically discovers BLE devices and creates switchable controls for them in the Venus OS UI.
 
+**Accessing the BLE Router switches:**
+
+1. From the main screen, tap the **square toggle icon** (top left corner)
+2. This opens the Settings pane showing all available switches
+3. Scroll to find **BLE Router** switches
+
+> **Don't see switches?** See the [Switches Not Visible](#switches-not-visible) troubleshooting section.
+
+![Settings Pane Access](screenshots/settings-pane.png)
+
+*The square toggle icon (top left, circled in red) opens the Settings pane where you can control all switches including BLE Router.*
+
 ![BLE Router Switches](screenshots/ble-router-switches.png)
 
 *The BLE Router switches screen showing the discovery toggle and discovered devices. Each device can be individually enabled or disabled.*
@@ -224,13 +236,14 @@ The BLE Router automatically discovers BLE devices and creates switchable contro
 - **Discovered Devices** - Each discovered device gets its own enable/disable toggle with MAC address
 - **Active Indication** - The asterisk (*) indicates the discovery toggle is currently visible in the UI
 
-### How to Re-enable Discovery
+### How to Re-enable Hidden Discovery
 
 By default, the "BLE Router New Device Discovery" toggle may be hidden to reduce UI clutter after initial setup. To re-enable it:
 
-1. Navigate to **Settings → Switches → BLE Router**
-2. Tap the **gear/settings icon** on the "BLE Router New Device Discovery" switch
-3. Enable **"Show controls"**
+1. Tap the **square toggle icon** (top left) to open the Settings pane
+2. Find the **BLE Router** switches
+3. Tap the **gear/settings icon** on the "BLE Router New Device Discovery" switch
+4. Enable **"Show controls"**
 
 ![BLE Router Show Controls Setting](screenshots/ble-router-show-controls-setting.png)
 
@@ -241,7 +254,39 @@ Once enabled, the discovery toggle will appear with an asterisk (*) in the main 
 - Turn off discovery when you're done to save battery/resources
 - Re-enable it anytime you need to add new devices
 
-**Note:** This same process applies to other switch-based services like SmartShunt Aggregator and SeeLevel Sensor Control.
+**Note:** This same process applies to other switch-based services like SeeLevel Sensor Control and Orion-TR.
+
+## Troubleshooting
+
+### Switches Not Visible
+
+#### If the square toggle icon doesn't appear at all on the main screen:
+
+This means no switches are currently enabled on your system. To enable discovery and create the initial switches, you need to access the device list:
+
+**Step 1: Access the Device List**
+1. From the main screen, tap the **round toggle icon** (top left corner, next to where the square one would be)
+2. This opens the device list showing all DBus devices
+3. Scroll down to find **"BLE Router"** device
+
+**Step 2: Enable Discovery**
+1. Tap on the **BLE Router** device
+2. Find the setting **"BLE Router New Device Discovery"**
+3. Toggle it **ON** (this enables BLE scanning)
+
+**Step 3: Wait for Discovery**
+1. Wait 30-60 seconds for BLE devices to be discovered
+2. Once discovered, device switches will appear
+3. The **square toggle icon** should now appear on the main screen
+
+**Step 4: Configure Discovery (Optional)**
+- After initial setup, you can disable discovery to save resources
+- Discovered devices persist across reboots
+- Re-enable discovery anytime you need to add new devices
+
+#### If the Settings pane opens but BLE Router switches aren't visible:
+
+Switches may be hidden ("Show controls" disabled). See [How to Re-enable Hidden Discovery](#how-to-re-enable-hidden-discovery) above.
 
 ## Service Management
 
