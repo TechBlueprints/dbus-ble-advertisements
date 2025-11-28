@@ -360,10 +360,11 @@ class BLEAdvertisementRouter:
                 # Update Status to match State (0x00 = off, 0x09 = on)
                 self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if value == 1 else 0x00
                 
-                # If device is disabled, immediately hide it from the UI
+                # If device is disabled, completely remove it from D-Bus to reduce GUI load
                 if value == 0:
-                    self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Settings/ShowUIControl'] = 0
-                    logging.info(f"Hidden '{device_name}' from switches pane (disabled)")
+                    logging.info(f"Removing '{device_name}' from D-Bus (disabled)")
+                    self._remove_discovered_device(device_id)
+                    return True
                 
                 # Persist the change
                 self._save_discovered_devices()
@@ -410,21 +411,32 @@ class BLEAdvertisementRouter:
                 else:
                     logging.info(f"Keeping {device_info['name']} hidden (disabled)")
         else:
-            # Discovery disabled: hide all device toggles
-            logging.info("Discovery disabled - hiding all device switches")
+            # Discovery disabled: remove all disabled devices, hide enabled ones
+            logging.info("Discovery disabled - removing disabled devices, hiding enabled ones")
             # Note: Discovery switch itself stays visible (don't change ShowUIControl)
             
-            # Hide all discovered device toggles
+            # Remove disabled devices completely, hide enabled ones
+            devices_to_remove = []
             for device_id, device_info in self.discovered_devices.items():
                 relay_id = device_info['relay_id']
                 
                 # Skip the discovery switch itself (safety check)
                 if relay_id == 'discovery':
                     continue
-                    
-                output_path = f'/SwitchableOutput/relay_{relay_id}'
-                self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
-                logging.info(f"Hidden {device_info['name']} from switches pane")
+                
+                if not device_info.get('enabled', True):
+                    # Device is disabled: remove it completely
+                    devices_to_remove.append(device_id)
+                    logging.info(f"Removing disabled device {device_info['name']}")
+                else:
+                    # Device is enabled: just hide it
+                    output_path = f'/SwitchableOutput/relay_{relay_id}'
+                    self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
+                    logging.info(f"Hidden enabled device {device_info['name']} from switches pane")
+            
+            # Remove disabled devices (can't modify dict during iteration)
+            for device_id in devices_to_remove:
+                self._remove_discovered_device(device_id)
         
         return True  # Accept the change
     
@@ -582,7 +594,7 @@ class BLEAdvertisementRouter:
         self._save_discovered_devices()
     
     def _remove_discovered_device(self, device_id: str):
-        """Hide a discovered device's switchable output slot"""
+        """Remove a discovered device's switchable output slot and delete all D-Bus paths"""
         if device_id not in self.discovered_devices:
             return
         
@@ -590,12 +602,29 @@ class BLEAdvertisementRouter:
         relay_id = device_info['relay_id']
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
-        # Hide the slot but keep it allocated
-        self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
-        self.dbusservice[f'{output_path}/State'] = 0
-        self.dbusservice[f'{output_path}/Status'] = 0x00
+        # Delete all D-Bus paths for this relay to reduce GUI load
+        paths_to_delete = [
+            f'{output_path}/Name',
+            f'{output_path}/Type',
+            f'{output_path}/State',
+            f'{output_path}/Status',
+            f'{output_path}/Settings/CustomName',
+            f'{output_path}/Settings/Type',
+            f'{output_path}/Settings/ValidTypes',
+            f'{output_path}/Settings/Function',
+            f'{output_path}/Settings/ValidFunctions',
+            f'{output_path}/Settings/Group',
+            f'{output_path}/Settings/ShowUIControl',
+        ]
         
-        logging.info(f"Hid device {device_info['name']} from switches pane")
+        for path in paths_to_delete:
+            if path in self.dbusservice:
+                try:
+                    del self.dbusservice[path]
+                except Exception as e:
+                    logging.warning(f"Failed to delete path {path}: {e}")
+        
+        logging.info(f"Removed device {device_info['name']} and deleted all D-Bus paths")
         del self.discovered_devices[device_id]
     
     def _on_device_state_changed(self, device_id: str, path: str, value: int):
