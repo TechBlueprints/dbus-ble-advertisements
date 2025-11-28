@@ -39,46 +39,42 @@ Multiple BLE scanners (using `bleak` or similar libraries) cannot coexist on Ven
 
 ## Installation
 
-### Recommended: Automated Installation
+### Recommended: One-Line Remote Install
+
+The easiest way to install is via remote installer (run directly on your Cerbo):
 
 ```bash
-# Clone repository
-git clone https://github.com/TechBlueprints/dbus-ble-advertisements.git
-cd dbus-ble-advertisements
+# Via curl
+curl -fsSL https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
 
-# Copy to Cerbo and run installer
-scp -r * root@cerbo:/data/apps/dbus-ble-advertisements/
-ssh root@cerbo 'cd /data/apps/dbus-ble-advertisements && bash install.sh'
+# Or via wget
+wget -qO- https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
 ```
 
 The installer will:
-- Set up the service directory structure
-- Create service symlink for auto-start
-- Configure persistence across reboots via `/data/rc.local`
-- Verify the service is running
+- Install git if needed
+- Clone or update the repository
+- Install or restart the service
+- Check discovery status and warn if disabled
 
-### Manual Installation
+### Alternative: Manual Step-by-Step
 
-If you prefer manual installation:
+If you prefer to run the steps manually on your Cerbo:
 
 ```bash
-# Create directory on Cerbo
-ssh root@cerbo 'mkdir -p /data/apps/dbus-ble-advertisements'
+# SSH into your Cerbo
+ssh root@<cerbo-ip>
 
-# Copy files to Cerbo
-scp -r dbus-ble-advertisements.py service install-reboot.sh root@cerbo:/data/apps/dbus-ble-advertisements/
+# Install git (if not already installed)
+opkg install git
 
-# Make scripts executable
-ssh root@cerbo 'chmod +x /data/apps/dbus-ble-advertisements/dbus-ble-advertisements.py /data/apps/dbus-ble-advertisements/service/run /data/apps/dbus-ble-advertisements/service/log/run /data/apps/dbus-ble-advertisements/install-reboot.sh'
+# Clone the repository
+cd /data/apps
+git clone https://github.com/TechBlueprints/dbus-ble-advertisements.git
 
-# Link service (will auto-start)
-ssh root@cerbo 'ln -sf /data/apps/dbus-ble-advertisements/service /service/dbus-ble-advertisements'
-
-# Add to rc.local for persistence across reboots
-ssh root@cerbo "echo 'bash /data/apps/dbus-ble-advertisements/install-reboot.sh > /data/apps/dbus-ble-advertisements/startup.log 2>&1 &' >> /data/rc.local"
-
-# Verify running
-ssh root@cerbo 'svstat /service/dbus-ble-advertisements'
+# Run the service installer
+cd dbus-ble-advertisements
+bash install-service.sh
 ```
 
 ## D-Bus Interface
