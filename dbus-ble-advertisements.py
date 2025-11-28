@@ -391,7 +391,7 @@ class BLEAdvertisementRouter:
         if enabled:
             # Discovery enabled: only show device toggles that are still enabled
             logging.info("Discovery enabled - showing enabled device switches")
-            self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 1
+            # Note: Discovery switch itself stays visible (don't change ShowUIControl)
             
             # Only make enabled device toggles visible
             for device_id, device_info in self.discovered_devices.items():
@@ -407,7 +407,7 @@ class BLEAdvertisementRouter:
         else:
             # Discovery disabled: hide all device toggles
             logging.info("Discovery disabled - hiding all device switches")
-            self.dbusservice['/SwitchableOutput/relay_1/Settings/ShowUIControl'] = 0
+            # Note: Discovery switch itself stays visible (don't change ShowUIControl)
             
             # Hide all discovered device toggles
             for device_id, device_info in self.discovered_devices.items():
