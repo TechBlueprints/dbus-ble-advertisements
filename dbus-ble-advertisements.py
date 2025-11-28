@@ -396,6 +396,11 @@ class BLEAdvertisementRouter:
             # Only make enabled device toggles visible
             for device_id, device_info in self.discovered_devices.items():
                 relay_id = device_info['relay_id']
+                
+                # Skip the discovery switch itself (safety check)
+                if relay_id == 'discovery':
+                    continue
+                    
                 output_path = f'/SwitchableOutput/relay_{relay_id}'
                 
                 # Only show if device is enabled
@@ -412,6 +417,11 @@ class BLEAdvertisementRouter:
             # Hide all discovered device toggles
             for device_id, device_info in self.discovered_devices.items():
                 relay_id = device_info['relay_id']
+                
+                # Skip the discovery switch itself (safety check)
+                if relay_id == 'discovery':
+                    continue
+                    
                 output_path = f'/SwitchableOutput/relay_{relay_id}'
                 self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
                 logging.info(f"Hidden {device_info['name']} from switches pane")
