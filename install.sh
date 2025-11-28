@@ -126,6 +126,7 @@ if [ -L "/service/$SERVICE_NAME" ] && svstat "/service/$SERVICE_NAME" 2>/dev/nul
 else
     echo "Service not installed or not running. Running installation..."
     bash "$INSTALL_DIR/install-service.sh"
+    FRESH_INSTALL=true
 fi
 echo ""
 
@@ -134,14 +135,19 @@ echo "Installation Complete!"
 echo "========================================"
 echo ""
 
-# Check if discovery is enabled
-DISCOVERY_STATE=$(dbus -y com.victronenergy.switch.ble.advertisements /ble_advertisements/relay_0/State GetValue 2>/dev/null || echo "0")
-if [ "$DISCOVERY_STATE" = "0" ]; then
-    echo "⚠️  WARNING: BLE Router discovery is currently DISABLED"
-    echo ""
-    echo "To discover new BLE devices, you need to enable discovery."
-    echo "See: https://github.com/TechBlueprints/dbus-ble-advertisements#switches-not-visible"
-    echo ""
+# Check if discovery is enabled (skip for fresh installs as discovery is enabled by default)
+if [ "$FRESH_INSTALL" != true ]; then
+    # Wait a moment for D-Bus to be ready after restart
+    sleep 2
+    
+    DISCOVERY_STATE=$(dbus -y com.victronenergy.switch.ble.advertisements /ble_advertisements/relay_0/State GetValue 2>/dev/null || echo "")
+    if [ "$DISCOVERY_STATE" = "0" ]; then
+        echo "⚠️  WARNING: BLE Router discovery is currently DISABLED"
+        echo ""
+        echo "To discover new BLE devices, you need to enable discovery."
+        echo "See: https://github.com/TechBlueprints/dbus-ble-advertisements#switches-not-visible"
+        echo ""
+    fi
 fi
 
 echo "Service status:"
