@@ -157,6 +157,12 @@ else
     echo "✓ Service restarted"
 fi
 
+# Ensure discovery switch is always visible in GUI
+echo "Ensuring discovery switch is visible..."
+sleep 1  # Give D-Bus a moment to fully register
+dbus -y com.victronenergy.switch.ble.advertisements /SwitchableOutput/relay_1/Settings/ShowUIControl SetValue 1 2>/dev/null && echo "✓ Discovery switch is visible" || echo "Note: Discovery switch will be visible once service fully starts"
+
+
 # Verify service is healthy
 echo ""
 echo "Verifying installation..."
