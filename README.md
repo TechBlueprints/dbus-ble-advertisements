@@ -41,14 +41,8 @@ Multiple BLE scanners (using `bleak` or similar libraries) cannot coexist on Ven
 
 ### Recommended: One-Line Remote Install
 
-The easiest way to install is via remote installer (run directly on your Cerbo):
-
 ```bash
-# Via curl
-curl -fsSL https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
-
-# Or via wget
-wget -qO- https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
+ssh root@<cerbo-ip> "curl -fsSL https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash"
 ```
 
 The installer will:
@@ -57,9 +51,9 @@ The installer will:
 - Install or restart the service
 - Check discovery status and warn if disabled
 
-### Alternative: Manual Step-by-Step
+### Alternative: Manual Installation
 
-If you prefer to run the steps manually on your Cerbo:
+If you prefer to install manually:
 
 ```bash
 # SSH into your Cerbo
