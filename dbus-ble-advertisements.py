@@ -233,8 +233,8 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path('/State', 0x100)  # 0x100 = Connected (module-level state)
         
         # Create a single switchable output for new device discovery toggle
-        # Use relay_1 identifier - matching RemoteGPIO and GX IO Extender relay pattern
-        output_path = '/SwitchableOutput/relay_1'
+        # Use relay_discovery identifier for clarity
+        output_path = '/SwitchableOutput/relay_discovery'
         self.dbusservice.add_path(f'{output_path}/Name', '* BLE Router New Device Discovery')
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle (at output level for GUI rendering)
         self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
@@ -283,8 +283,8 @@ class BLEAdvertisementRouter:
         
         # Restore discovery state from settings
         discovery_state = self._settings['DiscoveryEnabled']
-        self.dbusservice['/SwitchableOutput/relay_1/State'] = discovery_state
-        self.dbusservice['/SwitchableOutput/relay_1/Status'] = 0x09 if discovery_state else 0x00
+        self.dbusservice['/SwitchableOutput/relay_discovery/State'] = discovery_state
+        self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if discovery_state else 0x00
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
         
@@ -378,7 +378,7 @@ class BLEAdvertisementRouter:
         # Settings are already updated by SettingsDevice, no action needed
     
     def _on_discovery_changed(self, path, value):
-        """Callback when new device discovery toggle (SwitchableOutput/relay_1/State) changes"""
+        """Callback when new device discovery toggle (SwitchableOutput/relay_discovery/State) changes"""
         enabled = (value == 1)
         logging.info(f"New device discovery changed to: {enabled}")
         
@@ -386,7 +386,7 @@ class BLEAdvertisementRouter:
         self._settings['DiscoveryEnabled'] = value
         
         # Update Status to match State (0x00 = Off, 0x09 = On per Venus documentation)
-        self.dbusservice['/SwitchableOutput/relay_1/Status'] = 0x09 if enabled else 0x00
+        self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if enabled else 0x00
         
         if enabled:
             # Discovery enabled: only show device toggles that are still enabled
@@ -468,7 +468,7 @@ class BLEAdvertisementRouter:
                 self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
                 
                 # Only show if discovery is enabled
-                discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State']
+                discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
                 self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1 if discovery_enabled else 0, writeable=True)
                 
                 # Restore to in-memory tracking
@@ -486,7 +486,7 @@ class BLEAdvertisementRouter:
         Only updates if discovery mode is enabled - no need to update names when not discovering.
         """
         # Skip if discovery is disabled - no need to update UI elements
-        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State'] == 1
+        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
         if not discovery_enabled:
             return
         
@@ -535,7 +535,7 @@ class BLEAdvertisementRouter:
             device_type: "mac" or "mfgr"
         """
         # Only add if discovery is enabled and device doesn't already exist
-        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State']
+        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
         if discovery_enabled == 0 or device_id in self.discovered_devices:
             return
         
@@ -1017,7 +1017,7 @@ class BLEAdvertisementRouter:
         
         if not device_exists:
             # Step 3b: Device doesn't exist -> check if discovery is enabled
-            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_1/State'] == 1
+            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
             if discovery_enabled:
                 # Create an enabled switch for this MAC and then route it
                 device_name = self.device_names.get(mac, "")
