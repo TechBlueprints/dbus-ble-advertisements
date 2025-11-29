@@ -206,8 +206,8 @@ class BLEAdvertisementRouter:
         # Migrate settings from old service name if needed
         self._migrate_settings()
         
-        # Create a BusName for the emitters to use (no .switch prefix - any service can have switchable outputs)
-        self.bus_name = dbus.service.BusName('com.victronenergy.ble_advertisements', bus)
+        # Create a BusName for the emitters to use (with .switch prefix for GUI recognition)
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_advertisements', bus)
         
         # Create root object to provide GetVersion, GetStatus, GetHeartbeat methods
         self.root_obj = RootObject(self.bus_name)
@@ -218,7 +218,7 @@ class BLEAdvertisementRouter:
         from settingsdevice import SettingsDevice
         
         # Create as a device with switchable outputs so it appears in the device list
-        self.dbusservice = VeDbusService('com.victronenergy.ble_advertisements', bus, register=False)
+        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_advertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
