@@ -243,6 +243,7 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
                                    onchangecallback=self._on_discovery_changed)
         self.dbusservice.add_path(f'{output_path}/Status', 0x00)  # 0x00 = Off, 0x09 = On
+        self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
         
         # Add settings paths (under /Settings/)
         self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
@@ -528,6 +529,7 @@ class BLEAdvertisementRouter:
                 self.dbusservice.add_path(f'{output_path}/State', 1 if enabled else 0, writeable=True,
                                            onchangecallback=self._on_relay_state_changed)
                 self.dbusservice.add_path(f'{output_path}/Status', 0x09 if enabled else 0x00)
+                self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
                 self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
                 self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
                 self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
@@ -618,6 +620,7 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/State', 1, writeable=True,
                                    onchangecallback=self._on_relay_state_changed)  # Enabled by default
         self.dbusservice.add_path(f'{output_path}/Status', 0x09)  # On
+        self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
         self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
