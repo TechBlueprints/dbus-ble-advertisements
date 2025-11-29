@@ -231,10 +231,9 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path('/FirmwareVersion', '1.0.0')
         self.dbusservice.add_path('/HardwareVersion', None)
         self.dbusservice.add_path('/Connected', 1)
+        self.dbusservice.add_path('/State', 0x100)  # Required for GUI device list visibility
         
         # Add switch-specific paths (required for switch devices)
-        # Note: /State at root level is NOT needed for switch devices
-        # Individual switches have their own /SwitchableOutput/relay_*/State paths
         
         # Create a single switchable output for new device discovery toggle
         # Use relay_discovery identifier for clarity
