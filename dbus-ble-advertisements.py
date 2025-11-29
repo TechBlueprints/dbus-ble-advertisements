@@ -230,7 +230,6 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path('/CustomName', 'BLE Router')
         self.dbusservice.add_path('/FirmwareVersion', '1.0.0')
         self.dbusservice.add_path('/HardwareVersion', None)
-        self.dbusservice.add_path('/Serial', 'BLE001')
         self.dbusservice.add_path('/Connected', 1)
         
         # Add switch-specific paths (required for switch devices)
