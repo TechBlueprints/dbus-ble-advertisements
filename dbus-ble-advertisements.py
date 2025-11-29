@@ -744,15 +744,15 @@ class BLEAdvertisementRouter:
     def _scan_next_service(self):
         """Idle callback to process the next queued service for registrations.
         
-        Returns True while there is more work to do, False when the initial
-        scan is complete so GLib stops calling us.
+        Schedules itself again if there's more work to do.
         """
         if not self._pending_scan_services:
             logging.info(
                 f"Async registration scan complete - mfgr={len(self.mfg_registrations)}, "
-                f"mac={len(self.mac_registrations)}"
+                f"mac={len(self.mac_registrations)}, pid={len(self.pid_registrations)}, "
+                f"pid_range={len(self.pid_range_registrations)}"
             )
-            return False
+            return False  # Don't reschedule
         
         service_name = self._pending_scan_services.pop(0)
         logging.debug(
@@ -766,8 +766,17 @@ class BLEAdvertisementRouter:
         except Exception as e:
             logging.debug("Async scan: error checking %s: %s", service_name, e)
         
-        # Return True to be called again for the next service
-        return True
+        # Schedule the next service scan via idle_add
+        if self._pending_scan_services:
+            GLib.idle_add(self._scan_next_service)
+        else:
+            logging.info(
+                f"Async registration scan complete - mfgr={len(self.mfg_registrations)}, "
+                f"mac={len(self.mac_registrations)}, pid={len(self.pid_registrations)}, "
+                f"pid_range={len(self.pid_range_registrations)}"
+            )
+        
+        return False  # Don't reschedule automatically
     
     def _update_heartbeat(self):
         """Periodic callback to update heartbeat timestamp"""
