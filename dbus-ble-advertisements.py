@@ -274,7 +274,7 @@ class BLEAdvertisementRouter:
             ],
             "DiscoveryEnabled": [
                 "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
-                0,  # Default: OFF
+                1,  # Default: ON
                 0,
                 1,
             ],
