@@ -18,11 +18,13 @@ BLE Advertisement Router for Venus OS
 
 Monitors BLE advertisements via btmon and broadcasts them via D-Bus signals.
 Only emits updates when data changes or 10 minutes have elapsed.
-Filters based on manufacturer IDs and MAC addresses registered via D-Bus.
+Filters based on manufacturer IDs, product IDs, and MAC addresses registered via D-Bus.
 
 Clients register by creating D-Bus objects at:
-  /ble_advertisements/{service_name}/mfgr/{id}    - for manufacturer ID filtering
-  /ble_advertisements/{service_name}/addr/{mac}   - for MAC address filtering
+  /ble_advertisements/{service_name}/mfgr/{id}                      - all devices from manufacturer
+  /ble_advertisements/{service_name}/mfgr/{id}/pid/{product_id}     - specific product ID
+  /ble_advertisements/{service_name}/mfgr/{id}/pid_range/{min}_{max} - range of product IDs
+  /ble_advertisements/{service_name}/addr/{mac}                     - specific MAC address
 
 The router emits Advertisement signals on those same paths (per-application).
 Each service gets its own signal path matching its registration.
@@ -312,10 +314,16 @@ class BLEAdvertisementRouter:
         # for advertisement signal routing to client services
         # For now, we're only implementing the UI control via the switch device
         
-        # Filters: manufacturer IDs and MAC addresses we care about
+        # Filters: manufacturer IDs, product IDs, and MAC addresses we care about
         # Key: mfg_id or MAC, Value: set of full registration paths
         self.mfg_registrations: Dict[int, Set[str]] = {}  # mfg_id -> {'/ble_advertisements/orion_tr/mfgr/737', ...}
         self.mac_registrations: Dict[str, Set[str]] = {}  # MAC -> {'/ble_advertisements/orion_tr/addr/EFC...', ...}
+        
+        # Product ID filters (more specific than manufacturer-only)
+        # Key: (mfg_id, product_id), Value: set of full registration paths
+        self.pid_registrations: Dict[Tuple[int, int], Set[str]] = {}  # (mfg_id, pid) -> {paths}
+        # Key: (mfg_id, min_pid, max_pid), Value: set of full registration paths
+        self.pid_range_registrations: Dict[Tuple[int, int, int], Set[str]] = {}  # (mfg_id, min, max) -> {paths}
         
         # Signal emitters for each registered path
         # Key: full path (e.g., '/ble_advertisements/orion_tr/mfgr/737'), Value: AdvertisementEmitter
@@ -846,6 +854,22 @@ class BLEAdvertisementRouter:
                 if not paths:
                     del self.mac_registrations[mac]
         
+        # Remove from product ID registrations
+        for key, paths in list(self.pid_registrations.items()):
+            paths_to_remove = {p for p in paths if service_name in p}
+            if paths_to_remove:
+                paths.difference_update(paths_to_remove)
+                if not paths:
+                    del self.pid_registrations[key]
+        
+        # Remove from product ID range registrations
+        for key, paths in list(self.pid_range_registrations.items()):
+            paths_to_remove = {p for p in paths if service_name in p}
+            if paths_to_remove:
+                paths.difference_update(paths_to_remove)
+                if not paths:
+                    del self.pid_range_registrations[key]
+        
         # Remove emitters
         paths_to_remove = [path for path in self.emitters.keys() if service_name in path]
         if paths_to_remove:
@@ -866,6 +890,12 @@ class BLEAdvertisementRouter:
             active_paths.update(paths)
         
         for paths in self.mac_registrations.values():
+            active_paths.update(paths)
+        
+        for paths in self.pid_registrations.values():
+            active_paths.update(paths)
+        
+        for paths in self.pid_range_registrations.values():
             active_paths.update(paths)
         
         logging.info(f"_update_emitters: {len(active_paths)} active paths, {len(self.emitters)} existing emitters")
@@ -898,17 +928,47 @@ class BLEAdvertisementRouter:
             root = ET.fromstring(xml)
             
             # Check current path for pattern: /ble_advertisements/{service}/mfgr/{id}
+            # or /ble_advertisements/{service}/mfgr/{id}/pid/{product_id}
+            # or /ble_advertisements/{service}/mfgr/{id}/pid_range/{min}_{max}
             # or /ble_advertisements/{service}/addr/{mac}
             if '/ble_advertisements/' in path and '/mfgr/' in path:
-                # Extract manufacturer ID from path
-                # e.g., /ble_advertisements/orion_tr/mfgr/737 -> 737
-                parts = path.split('/mfgr/')
-                if len(parts) == 2:
-                    mfg_id = int(parts[1])
-                    if mfg_id not in self.mfg_registrations:
-                        self.mfg_registrations[mfg_id] = set()
-                    self.mfg_registrations[mfg_id].add(path)
-                    logging.debug(f"Registered {path} from {service_name}")
+                # Check for product ID range: /mfgr/{id}/pid_range/{min}_{max}
+                if '/pid_range/' in path:
+                    # e.g., /ble_advertisements/orion_tr/mfgr/737/pid_range/41920_41951
+                    match = re.search(r'/mfgr/(\d+)/pid_range/(\d+)_(\d+)$', path)
+                    if match:
+                        mfg_id = int(match.group(1))
+                        min_pid = int(match.group(2))
+                        max_pid = int(match.group(3))
+                        key = (mfg_id, min_pid, max_pid)
+                        if key not in self.pid_range_registrations:
+                            self.pid_range_registrations[key] = set()
+                        self.pid_range_registrations[key].add(path)
+                        logging.info(f"Registered pid_range {path} from {service_name} (mfg={mfg_id}, pid={min_pid}-{max_pid})")
+                
+                # Check for specific product ID: /mfgr/{id}/pid/{product_id}
+                elif '/pid/' in path:
+                    # e.g., /ble_advertisements/orion_tr/mfgr/737/pid/41937
+                    match = re.search(r'/mfgr/(\d+)/pid/(\d+)$', path)
+                    if match:
+                        mfg_id = int(match.group(1))
+                        pid = int(match.group(2))
+                        key = (mfg_id, pid)
+                        if key not in self.pid_registrations:
+                            self.pid_registrations[key] = set()
+                        self.pid_registrations[key].add(path)
+                        logging.info(f"Registered pid {path} from {service_name} (mfg={mfg_id}, pid={pid})")
+                
+                # Manufacturer-only registration: /mfgr/{id}
+                else:
+                    # e.g., /ble_advertisements/orion_tr/mfgr/737 -> 737
+                    parts = path.split('/mfgr/')
+                    if len(parts) == 2 and '/' not in parts[1]:
+                        mfg_id = int(parts[1])
+                        if mfg_id not in self.mfg_registrations:
+                            self.mfg_registrations[mfg_id] = set()
+                        self.mfg_registrations[mfg_id].add(path)
+                        logging.info(f"Registered mfgr {path} from {service_name} (mfg={mfg_id})")
             
             elif '/ble_advertisements/' in path and '/addr/' in path:
                 # Extract MAC from path
@@ -945,8 +1005,52 @@ class BLEAdvertisementRouter:
         except Exception as e:
             logging.debug(f"Error parsing XML for {service_name}{path}: {e}")
     
+    def _extract_product_id(self, data: bytes) -> Optional[int]:
+        """Extract product ID from Victron BLE advertisement data.
+        
+        For Victron devices (mfg_id 0x02E1), the product ID is at bytes 2-3 (little-endian).
+        Returns None if data is too short or extraction fails.
+        """
+        if len(data) >= 4:
+            try:
+                import struct
+                return struct.unpack("<H", data[2:4])[0]
+            except:
+                pass
+        return None
+    
+    def _has_registration_for_advertisement(self, mac: str, mfg_id: int, product_id: Optional[int] = None) -> bool:
+        """Check if any service has registered interest in this advertisement.
+        
+        Returns True if:
+        - Anyone registered for this specific MAC address, OR
+        - Anyone registered for this manufacturer ID (without product filter), OR
+        - Anyone registered for this specific (mfg_id, product_id) combo, OR
+        - Anyone registered for a (mfg_id, min, max) range that includes product_id
+        """
+        # Check MAC registrations first (most specific)
+        if mac in self.mac_registrations:
+            return True
+        
+        # Check product ID registrations (if we have a product ID)
+        if product_id is not None:
+            # Check specific product ID registrations
+            if (mfg_id, product_id) in self.pid_registrations:
+                return True
+            
+            # Check product ID range registrations
+            for (reg_mfg, min_pid, max_pid), paths in self.pid_range_registrations.items():
+                if reg_mfg == mfg_id and min_pid <= product_id <= max_pid:
+                    return True
+        
+        # Check manufacturer-only registrations (least specific)
+        if mfg_id in self.mfg_registrations:
+            return True
+        
+        return False
+    
     def should_process_advertisement(self, mac: str, mfg_id: int) -> bool:
-        """Check if this advertisement matches our filters"""
+        """Check if this advertisement matches our filters (basic check without product ID)"""
         # Check if anyone registered for this manufacturer ID
         if mfg_id in self.mfg_registrations:
             return True
@@ -954,6 +1058,15 @@ class BLEAdvertisementRouter:
         # Check if anyone registered for this specific MAC
         if mac in self.mac_registrations:
             return True
+        
+        # Check if there are any product ID or range registrations for this manufacturer
+        for (reg_mfg, pid) in self.pid_registrations.keys():
+            if reg_mfg == mfg_id:
+                return True
+        
+        for (reg_mfg, min_pid, max_pid) in self.pid_range_registrations.keys():
+            if reg_mfg == mfg_id:
+                return True
         
         return False
     
@@ -1060,18 +1173,21 @@ class BLEAdvertisementRouter:
     
     def process_advertisement(self, mac: str, mfg_id: int, hex_data: str, rssi: int, interface: str):
         """Process a complete BLE advertisement"""
-        # Step 1: Check if anything is registered to receive these notifications
-        # (either for this specific MAC or this manufacturer ID)
-        has_registration = (mac in self.mac_registrations) or (mfg_id in self.mfg_registrations)
-        if not has_registration:
-            return  # No one cares about this advertisement
-        
-        # Convert hex string to bytes
+        # Convert hex string to bytes first (needed to extract product ID)
         try:
             data = bytes.fromhex(hex_data)
         except ValueError:
             logging.warning(f"Invalid hex data from {mac}: {hex_data}")
             return
+        
+        # Extract product ID from the advertisement data (for Victron devices)
+        product_id = self._extract_product_id(data)
+        
+        # Step 1: Check if anything is registered to receive these notifications
+        # This now includes product ID filtering
+        has_registration = self._has_registration_for_advertisement(mac, mfg_id, product_id)
+        if not has_registration:
+            return  # No one cares about this advertisement
         
         # Check if we should emit this update (deduplication)
         if not self.should_emit_update(mac, mfg_id, data):
@@ -1129,6 +1245,9 @@ class BLEAdvertisementRouter:
             # Get device name from cache (or empty string if unknown)
             device_name = self.device_names.get(mac, "")
             
+            # Extract product ID for filtering
+            product_id = self._extract_product_id(data)
+            
             # Convert data to dbus types
             data_array = dbus.Array(data, signature='y')
             mac_dbus = dbus.String(mac)
@@ -1139,12 +1258,29 @@ class BLEAdvertisementRouter:
             
             emitted_count = 0
             
-            # Emit on all paths registered for this manufacturer ID
+            # Emit on all paths registered for this manufacturer ID (no product filter)
             if mfg_id in self.mfg_registrations:
                 for path in self.mfg_registrations[mfg_id]:
                     if path in self.emitters:
                         self.emitters[path].Advertisement(mac_dbus, mfg_id_dbus, data_array, rssi_dbus, interface_dbus, name_dbus)
                         emitted_count += 1
+            
+            # Emit on paths registered for specific product ID
+            if product_id is not None:
+                key = (mfg_id, product_id)
+                if key in self.pid_registrations:
+                    for path in self.pid_registrations[key]:
+                        if path in self.emitters:
+                            self.emitters[path].Advertisement(mac_dbus, mfg_id_dbus, data_array, rssi_dbus, interface_dbus, name_dbus)
+                            emitted_count += 1
+                
+                # Emit on paths registered for product ID ranges
+                for (reg_mfg, min_pid, max_pid), paths in self.pid_range_registrations.items():
+                    if reg_mfg == mfg_id and min_pid <= product_id <= max_pid:
+                        for path in paths:
+                            if path in self.emitters:
+                                self.emitters[path].Advertisement(mac_dbus, mfg_id_dbus, data_array, rssi_dbus, interface_dbus, name_dbus)
+                                emitted_count += 1
             
             # Emit on all paths registered for this specific MAC
             if mac in self.mac_registrations:
@@ -1161,7 +1297,8 @@ class BLEAdvertisementRouter:
             
             if emitted_count > 0:
                 name_str = f" name='{device_name}'" if device_name else ""
-                logging.info(f"Broadcast: {mac}{name_str} mfg={mfg_id:#06x} len={len(data)} rssi={rssi} if={interface} → {emitted_count} path(s)")
+                pid_str = f" pid={product_id:#06x}" if product_id is not None else ""
+                logging.info(f"Broadcast: {mac}{name_str} mfg={mfg_id:#06x}{pid_str} len={len(data)} rssi={rssi} if={interface} → {emitted_count} path(s)")
         except Exception as e:
             logging.error(f"Failed to emit signal for {mac}: {e}")
     
