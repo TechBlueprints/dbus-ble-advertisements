@@ -456,53 +456,55 @@ class BLEAdvertisementRouter:
         # to indicate an "active" state, but using 0x09 here is not required
         # for GUI visibility and may in fact prevent the card from showing.
         
+        # Iterate over actual D-Bus paths (source of truth), not the dictionary cache
+        # Find all relay State paths
+        relay_paths = [p for p in self.dbusservice._dbusobjects.keys() 
+                       if p.startswith('/SwitchableOutput/relay_') and p.endswith('/State')
+                       and 'relay_discovery' not in p]
+        
         if enabled:
-            # Discovery enabled: only show device toggles that are still enabled
-            logging.info("Discovery enabled - showing enabled device switches")
-            # Note: Discovery switch itself stays visible (don't change ShowUIControl)
-            
-            # Only make enabled device toggles visible
-            for device_id, device_info in self.discovered_devices.items():
-                relay_id = device_info['relay_id']
+            # Discovery enabled: show all device toggles
+            logging.info("Discovery enabled - showing all device switches")
+            for state_path in relay_paths:
+                relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
+                output_path = f'/SwitchableOutput/{relay_part}'
+                show_path = f'{output_path}/Settings/ShowUIControl'
+                name_path = f'{output_path}/Name'
                 
-                # Skip the discovery switch itself (safety check)
-                if relay_id == 'discovery':
-                    continue
-                    
-                output_path = f'/SwitchableOutput/relay_{relay_id}'
-                
-                # Only show if device is enabled
-                if device_info.get('enabled', True):
-                    self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 1
-                    logging.info(f"Made {device_info['name']} visible in switches pane")
-                else:
-                    logging.info(f"Keeping {device_info['name']} hidden (disabled)")
+                if show_path in self.dbusservice:
+                    self.dbusservice[show_path] = 1
+                    name = self.dbusservice.get(name_path, relay_part) if name_path in self.dbusservice else relay_part
+                    logging.info(f"Made {name} visible in switches pane")
         else:
-            # Discovery disabled: remove all disabled devices, hide enabled ones
+            # Discovery disabled: remove disabled devices, hide enabled ones
             logging.info("Discovery disabled - removing disabled devices, hiding enabled ones")
-            # Note: Discovery switch itself stays visible (don't change ShowUIControl)
+            relays_to_remove = []
             
-            # Remove disabled devices completely, hide enabled ones
-            devices_to_remove = []
-            for device_id, device_info in self.discovered_devices.items():
-                relay_id = device_info['relay_id']
+            for state_path in relay_paths:
+                relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
+                relay_id = relay_part.replace('relay_', '')
+                output_path = f'/SwitchableOutput/{relay_part}'
+                name_path = f'{output_path}/Name'
+                name = self.dbusservice.get(name_path, relay_id) if name_path in self.dbusservice else relay_id
                 
-                # Skip the discovery switch itself (safety check)
-                if relay_id == 'discovery':
-                    continue
+                # Get current state from D-Bus
+                state = self.dbusservice[state_path]
+                device_enabled = (state == 1)
                 
-                if not device_info.get('enabled', True):
-                    # Device is disabled: remove it completely
-                    devices_to_remove.append(device_id)
-                    logging.info(f"Removing disabled device {device_info['name']}")
+                if not device_enabled:
+                    # Device is disabled: mark for removal
+                    relays_to_remove.append((relay_id, name))
                 else:
                     # Device is enabled: just hide it
-                    output_path = f'/SwitchableOutput/relay_{relay_id}'
-                    self.dbusservice[f'{output_path}/Settings/ShowUIControl'] = 0
-                    logging.info(f"Hidden enabled device {device_info['name']} from switches pane")
+                    show_path = f'{output_path}/Settings/ShowUIControl'
+                    if show_path in self.dbusservice:
+                        self.dbusservice[show_path] = 0
+                        logging.info(f"Hidden enabled device {name} from switches pane")
             
-            # Remove disabled devices (can't modify dict during iteration)
-            for device_id in devices_to_remove:
+            # Remove disabled devices (can't modify during iteration)
+            for relay_id, name in relays_to_remove:
+                logging.info(f"Removing disabled device {name}")
+                device_id = f"mac_{relay_id}"
                 self._remove_discovered_device(device_id)
         
         return True  # Accept the change
