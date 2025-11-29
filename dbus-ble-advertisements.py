@@ -235,14 +235,21 @@ class BLEAdvertisementRouter:
         
         # Add switch-specific paths (required for switch devices)
         
-        # Create a single switchable output for new device discovery toggle
-        # Use relay_discovery identifier for clarity
+        # Create a single switchable output for new device discovery toggle.
+        # Use relay_discovery identifier for clarity. For this master toggle we
+        # follow the same pattern as other simple switch devices (SeeLevel,
+        # SmartShunt): Status stays 0 (OK) regardless of On/Off, only State
+        # reflects the on/off value. Using Status=0x09 for an "active alarm"
+        # style state is appropriate for threshold relays, but *not* for the
+        # master discovery toggle, and it appears to confuse the GUI.
         output_path = '/SwitchableOutput/relay_discovery'
         self.dbusservice.add_path(f'{output_path}/Name', '* BLE Advertisements New Device Discovery')
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle (at output level for GUI rendering)
         self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
                                    onchangecallback=self._on_discovery_changed)
-        self.dbusservice.add_path(f'{output_path}/Status', 0x00)  # 0x00 = Off, 0x09 = On
+        # Keep Status at 0 (OK) for the discovery switch, just like SeeLevel.
+        # The GUI uses /State to determine the toggle position.
+        self.dbusservice.add_path(f'{output_path}/Status', 0x00)
         self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
         
         # Add settings paths (under /Settings/)
@@ -295,7 +302,8 @@ class BLEAdvertisementRouter:
         # Now restore discovery state from settings AFTER registering
         discovery_state = self._settings['DiscoveryEnabled']
         self.dbusservice['/SwitchableOutput/relay_discovery/State'] = discovery_state
-        self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if discovery_state else 0x00
+        # Do not change Status here – leave it at 0 (OK) to match other
+        # simple switch implementations. Only State reflects on/off.
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
         
@@ -444,8 +452,10 @@ class BLEAdvertisementRouter:
         # Save to persistent settings
         self._settings['DiscoveryEnabled'] = value
         
-        # Update Status to match State (0x00 = Off, 0x09 = On per Venus documentation)
-        self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if enabled else 0x00
+        # Keep Status at 0 (OK) for the discovery switch; only State should
+        # indicate whether discovery is enabled. Other devices may use 0x09
+        # to indicate an "active" state, but using 0x09 here is not required
+        # for GUI visibility and may in fact prevent the card from showing.
         
         if enabled:
             # Discovery enabled: only show device toggles that are still enabled
