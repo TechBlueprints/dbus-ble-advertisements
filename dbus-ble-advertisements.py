@@ -207,7 +207,7 @@ class BLEAdvertisementRouter:
         self._migrate_settings()
         
         # Create a BusName for the emitters to use (with .switch prefix for GUI recognition)
-        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_advertisements', bus)
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.bleadvertisements', bus)
         
         # Create root object to provide GetVersion, GetStatus, GetHeartbeat methods
         self.root_obj = RootObject(self.bus_name)
@@ -218,7 +218,7 @@ class BLEAdvertisementRouter:
         from settingsdevice import SettingsDevice
         
         # Create as a device with switchable outputs so it appears in the device list
-        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_advertisements', bus, register=False)
+        self.dbusservice = VeDbusService('com.victronenergy.switch.bleadvertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -263,13 +263,13 @@ class BLEAdvertisementRouter:
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
             "ClassAndVrmInstance": [
-                "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
+                "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
                 "switch:110",
                 0,
                 0,
             ],
             "DiscoveryEnabled": [
-                "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+                "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
                 1,  # Default: ON
                 0,
                 1,
@@ -351,10 +351,14 @@ class BLEAdvertisementRouter:
         old_paths = [
             "/Settings/Devices/ble_router/ClassAndVrmInstance",
             "/Settings/Devices/ble_router/DiscoveryEnabled",
-        ]
-        new_paths = [
             "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
             "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+        ]
+        new_paths = [
+            "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
+            "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
+            "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
+            "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
         ]
         
         for old_path, new_path in zip(old_paths, new_paths):

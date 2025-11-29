@@ -160,7 +160,7 @@ fi
 # Ensure discovery switch is always visible in GUI
 echo "Ensuring discovery switch is visible..."
 sleep 1  # Give D-Bus a moment to fully register
-dbus -y com.victronenergy.ble_advertisements /SwitchableOutput/relay_discovery/Settings/ShowUIControl SetValue 1 2>/dev/null && echo "✓ Discovery switch is visible" || echo "Note: Discovery switch will be visible once service fully starts"
+dbus -y com.victronenergy.switch.bleadvertisements /SwitchableOutput/relay_discovery/Settings/ShowUIControl SetValue 1 2>/dev/null && echo "✓ Discovery switch is visible" || echo "Note: Discovery switch will be visible once service fully starts"
 
 
 # Verify service is healthy
@@ -168,11 +168,11 @@ echo ""
 echo "Verifying installation..."
 sleep 2
 
-if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null | grep -q "com.victronenergy.ble_advertisements"; then
+if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null | grep -q "com.victronenergy.switch.bleadvertisements"; then
     echo "✓ Service registered on D-Bus"
     
     # Try to get version
-    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.ble_advertisements /ble_advertisements com.techblueprints.ble.Advertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
+    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.switch.bleadvertisements /ble_advertisements com.techblueprints.ble.Advertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
     echo "✓ Service version: $VERSION"
 echo ""
 echo "========================================"
