@@ -737,7 +737,9 @@ class BLEAdvertisementRouter:
             )
             
             if self._pending_scan_services:
-                GLib.idle_add(self._scan_next_service)
+                # Use timeout_add with 100ms delay instead of idle_add
+                # to ensure the scan runs even if btmon output is consuming idle cycles
+                GLib.timeout_add(100, self._scan_next_service)
         except Exception as e:
             logging.error(f"Error scheduling initial scan: {e}", exc_info=True)
 
@@ -764,9 +766,9 @@ class BLEAdvertisementRouter:
         except Exception as e:
             logging.debug("Async scan: error checking %s: %s", service_name, e)
         
-        # Schedule the next service scan via idle_add
+        # Schedule the next service scan via timeout_add (100ms delay)
         if self._pending_scan_services:
-            GLib.idle_add(self._scan_next_service)
+            GLib.timeout_add(100, self._scan_next_service)
         else:
             logging.info(
                 f"Async registration scan complete - mfgr={len(self.mfg_registrations)}, "
