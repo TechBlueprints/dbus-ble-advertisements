@@ -255,16 +255,12 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
         
-        # Register the service after ALL paths are added
-        # Note: We'll create switchable outputs dynamically as devices are discovered
-        self.dbusservice.register()
-        
         # Track discovered devices that should appear as switchable outputs
         # Note: /SwitchableOutput is a container path, not a leaf - it's created implicitly by its children
         # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
         self.discovered_devices: Dict[str, dict] = {}
         
-        # Register device in settings (for GUI device list)
+        # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
             "ClassAndVrmInstance": [
                 "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
@@ -286,15 +282,18 @@ class BLEAdvertisementRouter:
             timeout=10
         )
         
-        # Restore discovery state from settings
+        # Restore discovery state from settings BEFORE registering
         discovery_state = self._settings['DiscoveryEnabled']
         self.dbusservice['/SwitchableOutput/relay_discovery/State'] = discovery_state
         self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if discovery_state else 0x00
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
         
-        # Restore previously discovered devices from persistent storage
+        # Restore previously discovered devices from persistent storage BEFORE registering
         self._load_discovered_devices()
+        
+        # Register the service after ALL paths are added (including restored devices)
+        self.dbusservice.register()
         
         logging.info("Created BLE Router device service as switch device")
         
