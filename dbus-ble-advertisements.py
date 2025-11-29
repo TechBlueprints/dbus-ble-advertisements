@@ -282,20 +282,23 @@ class BLEAdvertisementRouter:
             timeout=10
         )
         
-        # Restore discovery state from settings BEFORE registering
+        # Register the service EARLY with minimal paths (just discovery switch)
+        # Then add discovered devices after registration
+        self.dbusservice.register()
+        
+        logging.info("Registered BLE Router on D-Bus")
+        
+        # Now restore discovery state from settings AFTER registering
         discovery_state = self._settings['DiscoveryEnabled']
         self.dbusservice['/SwitchableOutput/relay_discovery/State'] = discovery_state
         self.dbusservice['/SwitchableOutput/relay_discovery/Status'] = 0x09 if discovery_state else 0x00
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
         
-        # Restore previously discovered devices from persistent storage BEFORE registering
+        # Restore previously discovered devices from persistent storage AFTER registering
         self._load_discovered_devices()
         
-        # Register the service after ALL paths are added (including restored devices)
-        self.dbusservice.register()
-        
-        logging.info("Created BLE Router device service as switch device")
+        logging.info("BLE Router initialization complete")
         
         # TODO: Re-implement com.victronenergy.ble.advertisements as a separate service
         # for advertisement signal routing to client services
