@@ -1265,10 +1265,13 @@ class BLEAdvertisementRouter:
         )
         logging.info("btmon output handler registered")
         
-        # Do initial service scan NOW (before main loop starts)
-        # This is synchronous but should be fast with the optimized scan
-        logging.info("Running initial service scan...")
-        self._scan_existing_services()
+        # NOTE: Initial deep registration scan is temporarily disabled.
+        # Previous synchronous scans over all com.victronenergy.* services were
+        # blocking the D-Bus mainloop long enough that the GUI's GetItems calls
+        # to this service timed out, causing the card to disappear.
+        # We now rely on NameOwnerChanged to discover client registrations
+        # when their services start after the router.
+        logging.info("Skipping initial registration scan (temporarily disabled)")
         
         mainloop = GLib.MainLoop()
         logging.info("Router service running...")
