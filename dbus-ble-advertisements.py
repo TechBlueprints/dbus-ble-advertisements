@@ -755,10 +755,8 @@ class BLEAdvertisementRouter:
             return False  # Don't reschedule
         
         service_name = self._pending_scan_services.pop(0)
-        logging.debug(
-            "Async scan: checking %s (%d remaining)",
-            service_name,
-            len(self._pending_scan_services),
+        logging.info(
+            f"Async scan: checking {service_name} ({len(self._pending_scan_services)} remaining)"
         )
         # Use a short timeout to further reduce risk of blocking the mainloop.
         try:
