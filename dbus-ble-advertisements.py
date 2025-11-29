@@ -262,13 +262,8 @@ class BLEAdvertisementRouter:
         self.discovered_devices: Dict[str, dict] = {}
         
         # TEMPORARY: Allow list of MAC addresses to create switches for
-        # Only these 4 devices will get switches created
-        self.mac_allow_list = {
-            '00a0508d9569',  # SeeLevel
-            'efc1119da391',  # Orion-TR
-            'fb8d9fa69893',  # Orion-TR
-            'f0c6dcc8747a',  # Orion-TR
-        }
+        # Disabled for now - no device switches should be created
+        self.mac_allow_list = set()
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
