@@ -538,6 +538,11 @@ class BLEAdvertisementRouter:
                 name = device_info['name']
                 enabled = device_info.get('enabled', True)
                 
+                # TEMPORARY: Only restore switches for allow-listed MAC addresses
+                if relay_id not in self.mac_allow_list:
+                    logging.info(f"Skipping restoration of non-allowed device: {name} (MAC: {relay_id})")
+                    continue
+                
                 # Recreate the D-Bus paths for this device
                 output_path = f'/SwitchableOutput/relay_{relay_id}'
                 self.dbusservice.add_path(f'{output_path}/Name', name)
