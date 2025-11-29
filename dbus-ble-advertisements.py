@@ -491,7 +491,7 @@ class BLEAdvertisementRouter:
                 relay_id = relay_part.replace('relay_', '')
                 output_path = f'/SwitchableOutput/{relay_part}'
                 name_path = f'{output_path}/Name'
-                name = self.dbusservice.get(name_path, relay_id) if name_path in self.dbusservice else relay_id
+                name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_id
                 
                 # Get current state from D-Bus
                 state = self.dbusservice[state_path]
@@ -561,13 +561,21 @@ class BLEAdvertisementRouter:
         """
         # MAC without colons as relay identifier
         relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
+        output_path = f'/SwitchableOutput/relay_{relay_id}'
         
-        # Only add if discovery is enabled and device doesn't already exist in cache
+        # Only add if discovery is enabled and device doesn't already exist
         discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
-        if discovery_enabled == 0 or relay_id in self.discovered_devices:
+        if discovery_enabled == 0:
             return
         
-        output_path = f'/SwitchableOutput/relay_{relay_id}'
+        # Check cache first (fast), then D-Bus (authoritative)
+        if relay_id in self.discovered_devices:
+            return
+        if f'{output_path}/State' in self.dbusservice:
+            # Switch exists on D-Bus but not in cache - add to cache
+            state = self.dbusservice[f'{output_path}/State']
+            self.discovered_devices[relay_id] = (state == 1)
+            return
         
         # Create new D-Bus paths for this device - enabled by default
         # Use context manager to emit ItemsChanged signal when done
