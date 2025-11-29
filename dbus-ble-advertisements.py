@@ -427,8 +427,8 @@ class BLEAdvertisementRouter:
         if device_id in self.discovered_devices:
             self.discovered_devices[device_id]['enabled'] = enabled
         
-        # Update Status to match State (0x00 = off, 0x09 = on)
-        self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if enabled else 0x00
+        # Status is always 0 (OK) - State indicates on/off
+        self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0
         
         # Log the change
         name_path = f'/SwitchableOutput/relay_{relay_id}/Name'
@@ -572,7 +572,7 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle
         self.dbusservice.add_path(f'{output_path}/State', 1, writeable=True,
                                    onchangecallback=self._on_relay_state_changed)
-        self.dbusservice.add_path(f'{output_path}/Status', 0x09)  # On
+        self.dbusservice.add_path(f'{output_path}/Status', 0)  # 0 = OK
         self.dbusservice.add_path(f'{output_path}/Current', 0)
         self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
