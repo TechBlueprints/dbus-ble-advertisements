@@ -807,7 +807,7 @@ class BLEAdvertisementRouter:
         try:
             self._check_service_registrations(service_name, timeout=1.0)
         except Exception as e:
-            logging.debug(f\"Async scan: error checking {service_name}: {e}\")
+            logging.debug("Async scan: error checking %s: %s", service_name, e)
         
         # Return True to be called again for the next service
         return True
