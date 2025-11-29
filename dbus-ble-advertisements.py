@@ -36,7 +36,6 @@ import sys
 import time
 import logging
 import signal
-import json
 import os
 from typing import Dict, Set, Tuple, Optional
 
@@ -47,7 +46,8 @@ from gi.repository import GLib
 
 HEARTBEAT_INTERVAL = 600  # 10 minutes
 REGISTRATION_SCAN_INTERVAL = 30  # Scan for new registrations every 30 seconds
-DEVICES_CONFIG_FILE = "/data/apps/dbus-ble-advertisements/devices.json"
+# Device enabled states are stored in D-Bus settings at:
+# /Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled
 
 
 class AdvertisementEmitter(dbus.service.Object):
@@ -305,8 +305,9 @@ class BLEAdvertisementRouter:
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
         
-        # Restore previously discovered devices from persistent storage AFTER registering
-        self._load_discovered_devices()
+        # Note: Device switches are created dynamically as BLE advertisements arrive.
+        # Enabled/disabled state per device is stored in D-Bus settings and loaded
+        # when each device is first seen.
         
         logging.info("BLE Advertisements initialization complete")
         
@@ -426,21 +427,22 @@ class BLEAdvertisementRouter:
         # Find which device_id is mapped to this relay_id
         for device_id, device_info in self.discovered_devices.items():
             if device_info.get('relay_id') == relay_id:
-                device_info['enabled'] = (value == 1)
+                enabled = (value == 1)
+                device_info['enabled'] = enabled
                 device_name = device_info['name']
-                logging.info(f"Device '{device_name}' routing changed to: {'enabled' if value == 1 else 'disabled'}")
+                logging.info(f"Device '{device_name}' routing changed to: {'enabled' if enabled else 'disabled'}")
                 
                 # Update Status to match State (0x00 = off, 0x09 = on)
-                self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if value == 1 else 0x00
+                self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if enabled else 0x00
+                
+                # Persist the enabled state to D-Bus settings
+                self._save_device_enabled_state(relay_id, enabled)
                 
                 # If device is disabled, completely remove it from D-Bus to reduce GUI load
-                if value == 0:
+                if not enabled:
                     logging.info(f"Removing '{device_name}' from D-Bus (disabled)")
                     self._remove_discovered_device(device_id)
-                    return True
                 
-                # Persist the change
-                self._save_discovered_devices()
                 return True
         
         logging.warning(f"State change for relay_{relay_id} but no device mapped to it")
@@ -515,69 +517,53 @@ class BLEAdvertisementRouter:
         
         return True  # Accept the change
     
-    def _save_discovered_devices(self):
-        """Save discovered devices to persistent storage"""
+    def _save_device_enabled_state(self, mac_sanitized: str, enabled: bool):
+        """Save device enabled state to D-Bus settings for persistence"""
         try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(DEVICES_CONFIG_FILE), exist_ok=True)
-            
-            # Save device info
-            with open(DEVICES_CONFIG_FILE, 'w') as f:
-                json.dump(self.discovered_devices, f, indent=2)
-            
-            logging.debug(f"Saved {len(self.discovered_devices)} discovered devices to {DEVICES_CONFIG_FILE}")
-        except Exception as e:
-            logging.error(f"Failed to save discovered devices: {e}")
+            settings_path = f"/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled"
+            # Use localsettings to persist the value
+            self.bus.call_blocking(
+                'com.victronenergy.settings',
+                '/Settings',
+                'com.victronenergy.Settings',
+                'AddSetting',
+                'ssvi',
+                [f"Devices/bleadvertisements/Device_{mac_sanitized}", "Enabled", 1 if enabled else 0, 0, 0, 1]
+            )
+            logging.debug(f"Saved device {mac_sanitized} enabled={enabled} to settings")
+        except dbus.exceptions.DBusException as e:
+            # Setting might already exist, try to update it
+            try:
+                self.bus.call_blocking(
+                    'com.victronenergy.settings',
+                    f'/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled',
+                    'com.victronenergy.BusItem',
+                    'SetValue',
+                    'v',
+                    [dbus.Int32(1 if enabled else 0)]
+                )
+                logging.debug(f"Updated device {mac_sanitized} enabled={enabled} in settings")
+            except Exception as e2:
+                logging.warning(f"Failed to save device state for {mac_sanitized}: {e2}")
     
-    def _load_discovered_devices(self):
-        """Load discovered devices from persistent storage and restore their slots"""
+    def _get_saved_device_enabled_state(self, mac_sanitized: str) -> Optional[bool]:
+        """Get saved device enabled state from D-Bus settings.
+        
+        Returns True/False if setting exists, None if device was never seen before.
+        """
         try:
-            if not os.path.exists(DEVICES_CONFIG_FILE):
-                logging.info("No saved devices found")
-                return
-            
-            with open(DEVICES_CONFIG_FILE, 'r') as f:
-                saved_devices = json.load(f)
-            
-            if not saved_devices:
-                logging.info("No devices to restore")
-                return
-            
-            logging.info(f"Restoring {len(saved_devices)} discovered devices from persistent storage...")
-            
-            for device_id, device_info in saved_devices.items():
-                relay_id = device_info['relay_id']
-                name = device_info['name']
-                enabled = device_info.get('enabled', True)
-                
-                # Recreate the D-Bus paths for this device
-                output_path = f'/SwitchableOutput/relay_{relay_id}'
-                self.dbusservice.add_path(f'{output_path}/Name', name)
-                self.dbusservice.add_path(f'{output_path}/Type', 1)
-                self.dbusservice.add_path(f'{output_path}/State', 1 if enabled else 0, writeable=True,
-                                           onchangecallback=self._on_relay_state_changed)
-                self.dbusservice.add_path(f'{output_path}/Status', 0x09 if enabled else 0x00)
-                self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
-                self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
-                self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
-                self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
-                self.dbusservice.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
-                self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
-                self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
-                
-                # Only show if discovery is enabled
-                discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
-                self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1 if discovery_enabled else 0, writeable=True)
-                self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1 if enabled else 0)  # 1 = enabled, 0 = disabled
-                
-                # Restore to in-memory tracking
-                self.discovered_devices[device_id] = device_info
-                
-                logging.info(f"Restored device: {name} at {output_path} (enabled={enabled})")
-            
-            logging.info(f"Device restoration complete - {len(saved_devices)} devices restored")
-        except Exception as e:
-            logging.error(f"Failed to load discovered devices: {e}", exc_info=True)
+            result = self.bus.call_blocking(
+                'com.victronenergy.settings',
+                f'/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled',
+                'com.victronenergy.BusItem',
+                'GetValue',
+                '',
+                []
+            )
+            return bool(result)
+        except dbus.exceptions.DBusException:
+            # Setting doesn't exist - device was never configured
+            return None
     
     def _update_device_name_if_exists(self, mac: str, name: str):
         """Update the toggle name for a device if it's already been discovered
@@ -604,8 +590,7 @@ class BLEAdvertisementRouter:
             # Update in-memory cache
             device_info['name'] = new_name
             
-            # Persist the change
-            self._save_discovered_devices()
+            # Note: Name is not persisted - it will be re-discovered from BLE advertisements
             
             logging.info(f"Updated device name: {new_name}")
     
@@ -628,6 +613,8 @@ class BLEAdvertisementRouter:
         Only adds if discovery is enabled and device doesn't already exist.
         Defaults: State=1 (enabled), ShowUIControl=1 (visible)
         
+        If this device was previously configured (has saved settings), use the saved enabled state.
+        
         Args:
             device_id: Sanitized identifier (e.g., "mac_abc123" or "mfgr_737")
             name: Human-readable name (e.g., "Orion TR (EF:C2:7B:38:54:60)" or "Mfgr 0x2E1")
@@ -642,14 +629,22 @@ class BLEAdvertisementRouter:
         # device_id format is "mac_abc123", so we can use it directly after "mac_"
         relay_id = device_id.replace('mac_', '')  # e.g., "efc1119da391"
         
+        # Check if there's a saved enabled state for this device
+        saved_enabled = self._get_saved_device_enabled_state(relay_id)
+        if saved_enabled is not None:
+            enabled = saved_enabled
+            logging.info(f"Restored saved enabled state for {relay_id}: {enabled}")
+        else:
+            enabled = True  # Default to enabled for new devices
+        
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
         # Create new D-Bus paths for this device
         self.dbusservice.add_path(f'{output_path}/Name', name)
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle
-        self.dbusservice.add_path(f'{output_path}/State', 1, writeable=True,
-                                   onchangecallback=self._on_relay_state_changed)  # Enabled by default
-        self.dbusservice.add_path(f'{output_path}/Status', 0x09)  # On
+        self.dbusservice.add_path(f'{output_path}/State', 1 if enabled else 0, writeable=True,
+                                   onchangecallback=self._on_relay_state_changed)
+        self.dbusservice.add_path(f'{output_path}/Status', 0x09 if enabled else 0x00)
         self.dbusservice.add_path(f'{output_path}/Current', 0)  # Required for switches to appear in GUI
         self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
@@ -658,20 +653,17 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
         self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # Visible
-        self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
+        self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1 if enabled else 0)
         
-        # Store device info
+        # Store device info in runtime cache
         self.discovered_devices[device_id] = {
-            'relay_id': relay_id,  # Store the relay identifier
+            'relay_id': relay_id,
             'name': name,
             'type': device_type,
-            'enabled': True  # Track if routing is enabled for this device
+            'enabled': enabled
         }
         
-        logging.info(f"Added discovered device: {name} (ID: {device_id}) at {output_path} - enabled and visible")
-        
-        # Persist to disk
-        self._save_discovered_devices()
+        logging.info(f"Added discovered device: {name} (ID: {device_id}) at {output_path} - enabled={enabled}")
     
     def _remove_discovered_device(self, device_id: str):
         """Remove a discovered device's switchable output slot and delete all D-Bus paths"""
