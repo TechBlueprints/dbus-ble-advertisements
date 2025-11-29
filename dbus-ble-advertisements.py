@@ -1134,9 +1134,9 @@ class BLEAdvertisementRouter:
             return
         
         if not device_exists:
-            # Step 3b: Device doesn't exist -> check if discovery is enabled
+            # Step 3b: Device doesn't exist -> check if discovery is enabled AND there's a registration
             discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
-            if discovery_enabled:
+            if discovery_enabled and has_registration:
                 # Create an enabled switch for this MAC and then route it
                 device_name = self.device_names.get(mac, "")
                 
@@ -1157,7 +1157,7 @@ class BLEAdvertisementRouter:
                 self._add_discovered_device(device_id, display_name, "mac")
                 # Route the advertisement
                 self._emit_advertisement(mac, mfg_id, data, rssi, interface)
-            # else: discovery disabled, device doesn't exist -> return (do nothing)
+            # else: discovery disabled or no registration -> return (do nothing)
         # else: device exists but is disabled -> return (do nothing)
     
     def _emit_advertisement(self, mac: str, mfg_id: int, data: bytes, rssi: int, interface: str):
