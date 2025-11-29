@@ -341,6 +341,9 @@ class BLEAdvertisementRouter:
         self.current_interface = None
         self.btmon_proc = None
         
+        # Pending services for asynchronous registration scan
+        self._pending_scan_services: list[str] = []
+        
         # Do initial full scan for registrations AFTER main loop starts (non-blocking)
         # DISABLED: We don't need to scan! Just emit to paths when we get matching advertisements.
         # The registration paths are defined by the pattern: /ble_advertisements/{service}/mfgr/{id} or /ble_advertisements/{service}/addr/{mac}
@@ -751,6 +754,62 @@ class BLEAdvertisementRouter:
         
         logging.info("=== INITIAL SERVICE SCAN COMPLETE - btmon processing should resume ===")
         return False  # Don't repeat this idle callback
+
+    def _schedule_initial_scan(self):
+        """Schedule a non-blocking initial registration scan.
+        
+        Instead of scanning all services synchronously (which can block the
+        D-Bus mainloop and cause GUI timeouts), we collect the list of
+        candidate services once and then process them incrementally via
+        GLib.idle_add.
+        """
+        try:
+            bus_obj = self.bus.get_object('org.freedesktop.DBus', '/')
+            bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
+            service_names = bus_iface.ListNames()
+            
+            # Only scan com.victronenergy.* services (skip system services)
+            self._pending_scan_services = [
+                s for s in service_names
+                if isinstance(s, str)
+                and s.startswith('com.victronenergy.')
+                and not s.startswith(':')
+            ]
+            logging.info(
+                f"Queued {len(self._pending_scan_services)} services for async registration scan"
+            )
+            
+            if self._pending_scan_services:
+                GLib.idle_add(self._scan_next_service)
+        except Exception as e:
+            logging.error(f"Error scheduling initial scan: {e}", exc_info=True)
+
+    def _scan_next_service(self):
+        """Idle callback to process the next queued service for registrations.
+        
+        Returns True while there is more work to do, False when the initial
+        scan is complete so GLib stops calling us.
+        """
+        if not self._pending_scan_services:
+            logging.info(
+                f"Async registration scan complete - mfgr={len(self.mfg_registrations)}, "
+                f"mac={len(self.mac_registrations)}"
+            )
+            return False
+        
+        service_name = self._pending_scan_services.pop(0)
+        logging.debug(
+            f"Async scan: checking {service_name} "
+            f\"({len(self._pending_scan_services)} remaining)\"
+        )
+        # Use a short timeout to further reduce risk of blocking the mainloop.
+        try:
+            self._check_service_registrations(service_name, timeout=1.0)
+        except Exception as e:
+            logging.debug(f\"Async scan: error checking {service_name}: {e}\")
+        
+        # Return True to be called again for the next service
+        return True
     
     def _update_heartbeat(self):
         """Periodic callback to update heartbeat timestamp"""
@@ -776,8 +835,13 @@ class BLEAdvertisementRouter:
         elif old_owner and not new_owner:
             self._remove_service_registrations(name)
     
-    def _check_service_registrations(self, service_name):
-        """Check a single service for BLE registration paths (fast, non-blocking)"""
+    def _check_service_registrations(self, service_name, timeout: float = 2.0):
+        """Check a single service for BLE registration paths.
+        
+        timeout: maximum time (seconds) to wait for D-Bus introspection. Kept
+        reasonably small when called from asynchronous scans to avoid blocking
+        the mainloop for too long.
+        """
         try:
             # Only check if this looks like a client service (not system services)
             if not service_name.startswith('com.victronenergy.'):
@@ -788,7 +852,7 @@ class BLEAdvertisementRouter:
             intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
             
             # Add timeout to avoid hanging on unresponsive services
-            xml = intro.Introspect(timeout=2.0)
+            xml = intro.Introspect(timeout=timeout)
             
             # Quick check: does this service have /ble_advertisements paths?
             if 'ble_advertisements' in xml:
@@ -1265,13 +1329,11 @@ class BLEAdvertisementRouter:
         )
         logging.info("btmon output handler registered")
         
-        # NOTE: Initial deep registration scan is temporarily disabled.
-        # Previous synchronous scans over all com.victronenergy.* services were
-        # blocking the D-Bus mainloop long enough that the GUI's GetItems calls
-        # to this service timed out, causing the card to disappear.
-        # We now rely on NameOwnerChanged to discover client registrations
-        # when their services start after the router.
-        logging.info("Skipping initial registration scan (temporarily disabled)")
+        # Kick off an asynchronous initial registration scan. We schedule it via
+        # GLib.idle_add so that we only ever inspect one service per idle loop,
+        # avoiding long blocking periods that could cause D-Bus timeouts for
+        # other clients (notably the GUI asking for GetItems on this service).
+        self._schedule_initial_scan()
         
         mainloop = GLib.MainLoop()
         logging.info("Router service running...")
