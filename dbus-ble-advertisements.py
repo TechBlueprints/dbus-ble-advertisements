@@ -253,6 +253,7 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)  # Bitmask: bit 2 set = Manual (0b100 = 4)
         self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
+        self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
         # Track discovered devices that should appear as switchable outputs
         # Note: /SwitchableOutput is a container path, not a leaf - it's created implicitly by its children
@@ -539,6 +540,7 @@ class BLEAdvertisementRouter:
                 # Only show if discovery is enabled
                 discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
                 self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1 if discovery_enabled else 0, writeable=True)
+                self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1 if enabled else 0)  # 1 = enabled, 0 = disabled
                 
                 # Restore to in-memory tracking
                 self.discovered_devices[device_id] = device_info
@@ -627,6 +629,7 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
         self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # Visible
+        self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
         # Store device info
         self.discovered_devices[device_id] = {
