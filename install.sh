@@ -142,7 +142,7 @@ if [ "$FRESH_INSTALL" != true ]; then
     
     DISCOVERY_STATE=$(dbus -y com.victronenergy.switch.bleadvertisements /SwitchableOutput/relay_discovery/State GetValue 2>/dev/null || echo "")
     if [ "$DISCOVERY_STATE" = "0" ]; then
-        echo "⚠️  WARNING: BLE Router discovery is currently DISABLED"
+        echo "⚠️  WARNING: BLE Advertisements discovery is currently DISABLED"
         echo ""
         echo "To discover new BLE devices, you need to enable discovery."
         echo "See: https://github.com/TechBlueprints/dbus-ble-advertisements#switches-not-visible"

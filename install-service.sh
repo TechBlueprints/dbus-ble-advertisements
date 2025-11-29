@@ -172,7 +172,7 @@ if dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop
     echo "✓ Service registered on D-Bus"
     
     # Try to get version
-    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.switch.bleadvertisements /ble_advertisements com.techblueprints.ble.Advertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
+    VERSION=$(dbus-send --system --print-reply --dest=com.victronenergy.switch.bleadvertisements /ble_advertisements com.victronenergy.switch.bleadvertisements.GetVersion 2>/dev/null | grep string | awk '{print $2}' | tr -d '"' || echo "unknown")
     echo "✓ Service version: $VERSION"
 echo ""
 echo "========================================"

@@ -17,7 +17,7 @@ This approach follows the pattern used by Victron's own [dbus-serialbattery](htt
 - **Purpose**: Venus OS D-Bus integration library
 - **Source**: https://github.com/victronenergy/velib_python
 - **License**: MIT
-- **Why needed**: Publishes the BLE router service to Venus OS D-Bus for GUI/VRM integration
+- **Why needed**: Publishes the BLE Advertisements service to Venus OS D-Bus for GUI/VRM integration
 
 ## Updating Dependencies
 

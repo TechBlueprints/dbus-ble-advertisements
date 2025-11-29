@@ -75,7 +75,7 @@ bash install-service.sh
 
 ### Service Name
 
-**`com.victronenergy.switch.ble.advertisements`**
+**`com.victronenergy.switch.bleadvertisements`**
 - Service for BLE advertisement routing and UI integration
 - **Use this for service availability checks**
 - Appears in Venus OS device list
@@ -86,7 +86,7 @@ bash install-service.sh
 
 ### Signal
 ```
-Interface: com.techblueprints.ble.Advertisements
+Interface: com.victronenergy.switch.bleadvertisements
 Signal: Advertisement(string mac, uint16 manufacturer_id, array of bytes data, int16 rssi, string interface, string name)
 ```
 
@@ -173,7 +173,7 @@ def advertisement_callback(mac, mfg_id, data, rssi, interface, name):
 bus.add_signal_receiver(
     advertisement_callback,
     signal_name='Advertisement',
-    dbus_interface='com.techblueprints.ble.Advertisements',
+    dbus_interface='com.victronenergy.switch.bleadvertisements',
     path='/ble-advertisements/orion-tr/mfgr/737'  # Same path as registration!
 )
 
@@ -203,39 +203,39 @@ mainloop.run()
 
 ### Device Discovery
 
-The BLE Router automatically discovers BLE devices and creates switchable controls for them in the Venus OS UI.
+The BLE Advertisements service automatically discovers BLE devices and creates switchable controls for them in the Venus OS UI.
 
-**Accessing the BLE Router switches:**
+**Accessing the BLE Advertisements switches:**
 
 1. From the main screen, tap the **square toggle icon** (top left corner)
 2. This opens the Settings pane showing all available switches
-3. Scroll to find **BLE Router** switches
+3. Scroll to find **BLE Advertisements** switches
 
 > **Don't see switches?** See the [Switches Not Visible](#switches-not-visible) troubleshooting section.
 
 ![Settings Pane Access](screenshots/settings-pane.png)
 
-*The square toggle icon (top left, circled in red) opens the Settings pane where you can control all switches including BLE Router.*
+*The square toggle icon (top left, circled in red) opens the Settings pane where you can control all switches including BLE Advertisements.*
 
-![BLE Router Switches](screenshots/ble-router-switches.png)
+![BLE Advertisements Switches](screenshots/ble-router-switches.png)
 
-*The BLE Router switches screen showing the discovery toggle and discovered devices. Each device can be individually enabled or disabled.*
+*The BLE Advertisements switches screen showing the discovery toggle and discovered devices. Each device can be individually enabled or disabled.*
 
 **Key features:**
-- **BLE Router New Device Discovery** - Toggle to enable/disable automatic device discovery
+- **BLE Advertisements New Device Discovery** - Toggle to enable/disable automatic device discovery
 - **Discovered Devices** - Each discovered device gets its own enable/disable toggle with MAC address
 - **Active Indication** - The asterisk (*) indicates the discovery toggle is currently visible in the UI
 
 ### How to Re-enable Hidden Discovery
 
-By default, the "BLE Router New Device Discovery" toggle may be hidden to reduce UI clutter after initial setup. To re-enable it:
+By default, the "BLE Advertisements New Device Discovery" toggle may be hidden to reduce UI clutter after initial setup. To re-enable it:
 
 1. Tap the **square toggle icon** (top left) to open the Settings pane
-2. Find the **BLE Router** switches
-3. Tap the **gear/settings icon** on the "BLE Router New Device Discovery" switch
+2. Find the **BLE Advertisements** switches
+3. Tap the **gear/settings icon** on the "BLE Advertisements New Device Discovery" switch
 4. Enable **"Show controls"**
 
-![BLE Router Show Controls Setting](screenshots/ble-router-show-controls-setting.png)
+![BLE Advertisements Show Controls Setting](screenshots/ble-router-show-controls-setting.png)
 
 *The settings page for the discovery toggle. Enable "Show controls" to make the discovery toggle visible in the main switches screen.*
 
@@ -257,11 +257,11 @@ This means no switches are currently enabled on your system. To enable discovery
 **Step 1: Access the Device List**
 1. From the main screen, tap the **round toggle icon** (top left corner, next to where the square one would be)
 2. This opens the device list showing all DBus devices
-3. Scroll down to find **"BLE Router"** device
+3. Scroll down to find **"BLE Advertisements"** device
 
 **Step 2: Enable Discovery**
-1. Tap on the **BLE Router** device
-2. Find the setting **"BLE Router New Device Discovery"**
+1. Tap on the **BLE Advertisements** device
+2. Find the setting **"BLE Advertisements New Device Discovery"**
 3. Toggle it **ON** (this enables BLE scanning)
 
 **Step 3: Wait for Discovery**
@@ -274,7 +274,7 @@ This means no switches are currently enabled on your system. To enable discovery
 - Discovered devices persist across reboots
 - Re-enable discovery anytime you need to add new devices
 
-#### If the Settings pane opens but BLE Router switches aren't visible:
+#### If the Settings pane opens but BLE Advertisements switches aren't visible:
 
 Switches may be hidden ("Show controls" disabled). See [How to Re-enable Hidden Discovery](#how-to-re-enable-hidden-discovery) above.
 

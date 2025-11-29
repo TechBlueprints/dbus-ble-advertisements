@@ -51,7 +51,7 @@ DEVICES_CONFIG_FILE = "/data/apps/dbus-ble-advertisements/devices.json"
 class AdvertisementEmitter(dbus.service.Object):
     """D-Bus object that emits signals for a specific manufacturer or MAC"""
     
-    @dbus.service.signal(dbus_interface='com.techblueprints.ble.Advertisements',
+    @dbus.service.signal(dbus_interface='com.victronenergy.switch.bleadvertisements',
                          signature='sqaynss')
     def Advertisement(self, mac, manufacturer_id, data, rssi, interface, name):
         """Signal emitted when a matching BLE advertisement is received
@@ -74,13 +74,13 @@ class RootObject(dbus.service.Object):
         dbus.service.Object.__init__(self, bus_name, '/ble_advertisements')
         self.heartbeat = time.time()
     
-    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
                          in_signature='', out_signature='s')
     def GetVersion(self):
         """Return service version"""
         return "1.0.0"
     
-    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
                          in_signature='', out_signature='s')
     def GetStatus(self):
         """Return service status based on heartbeat"""
@@ -90,7 +90,7 @@ class RootObject(dbus.service.Object):
         else:
             return "stale"
     
-    @dbus.service.method(dbus_interface='com.techblueprints.ble.Advertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
                          in_signature='', out_signature='d')
     def GetHeartbeat(self):
         """Return last heartbeat timestamp"""
@@ -223,11 +223,11 @@ class BLEAdvertisementRouter:
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
         self.dbusservice.add_path('/Mgmt/ProcessVersion', '1.0.0')
-        self.dbusservice.add_path('/Mgmt/Connection', 'BLE Router')
+        self.dbusservice.add_path('/Mgmt/Connection', 'BLE Advertisements')
         self.dbusservice.add_path('/DeviceInstance', 110)
         self.dbusservice.add_path('/ProductId', 0xFFFF)
-        self.dbusservice.add_path('/ProductName', 'BLE Advertisement Router')
-        self.dbusservice.add_path('/CustomName', 'BLE Router')
+        self.dbusservice.add_path('/ProductName', 'BLE Advertisements')
+        self.dbusservice.add_path('/CustomName', 'BLE Advertisements')
         self.dbusservice.add_path('/FirmwareVersion', '1.0.0')
         self.dbusservice.add_path('/HardwareVersion', None)
         self.dbusservice.add_path('/Connected', 1)
@@ -239,7 +239,7 @@ class BLEAdvertisementRouter:
         # Create a single switchable output for new device discovery toggle
         # Use relay_discovery identifier for clarity
         output_path = '/SwitchableOutput/relay_discovery'
-        self.dbusservice.add_path(f'{output_path}/Name', '* BLE Router New Device Discovery')
+        self.dbusservice.add_path(f'{output_path}/Name', '* BLE Advertisements New Device Discovery')
         self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle (at output level for GUI rendering)
         self.dbusservice.add_path(f'{output_path}/State', 0, writeable=True,
                                    onchangecallback=self._on_discovery_changed)
@@ -296,7 +296,7 @@ class BLEAdvertisementRouter:
         # Then add discovered devices after registration
         self.dbusservice.register()
         
-        logging.info("Registered BLE Router on D-Bus")
+        logging.info("Registered BLE Advertisements on D-Bus")
         
         # Now restore discovery state from settings AFTER registering
         discovery_state = self._settings['DiscoveryEnabled']
@@ -308,9 +308,9 @@ class BLEAdvertisementRouter:
         # Restore previously discovered devices from persistent storage AFTER registering
         self._load_discovered_devices()
         
-        logging.info("BLE Router initialization complete")
+        logging.info("BLE Advertisements initialization complete")
         
-        # TODO: Re-implement com.victronenergy.ble.advertisements as a separate service
+        # TODO: Re-implement old service names as a migration path if needed
         # for advertisement signal routing to client services
         # For now, we're only implementing the UI control via the switch device
         
@@ -1021,7 +1021,7 @@ class BLEAdvertisementRouter:
         
         return False
     
-    @dbus.service.signal(dbus_interface='com.techblueprints.ble.Advertisements',
+    @dbus.service.signal(dbus_interface='com.victronenergy.switch.bleadvertisements',
                          signature='sqayn')
     def Advertisement(self, mac, manufacturer_id, data, rssi):
         """
