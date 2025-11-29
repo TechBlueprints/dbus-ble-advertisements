@@ -267,9 +267,17 @@ class BLEAdvertisementRouter:
         # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
         self.discovered_devices: Dict[str, dict] = {}
         
-        # TEMPORARY: Allow list of MAC addresses to create switches for
-        # Disabled for now - no device switches should be created
-        self.mac_allow_list = set()
+        # Allow list of MAC addresses to create switches for.
+        # This limits switch creation to the specific integration devices we
+        # currently care about (1 SeeLevel, 3 Orion-TRs). Other devices will
+        # still be routed at the advertisement level, but won't get switches
+        # until we explicitly expand this list.
+        self.mac_allow_list = {
+            "00a0508d9569",  # SeeLevel
+            "efc1119da391",  # Orion-TR 48v
+            "fb8d9fa69893",  # Orion-TR RO Power
+            "f0c6dcc8747a",  # Orion-TR 24v CPAP
+        }
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
