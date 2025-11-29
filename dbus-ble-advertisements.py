@@ -520,29 +520,36 @@ class BLEAdvertisementRouter:
     def _save_device_enabled_state(self, mac_sanitized: str, enabled: bool):
         """Save device enabled state to D-Bus settings for persistence"""
         try:
-            settings_path = f"/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled"
-            # Use localsettings to persist the value
+            # Try to update existing setting first (most common case)
             self.bus.call_blocking(
                 'com.victronenergy.settings',
-                '/Settings',
-                'com.victronenergy.Settings',
-                'AddSetting',
-                'ssvi',
-                [f"Devices/bleadvertisements/Device_{mac_sanitized}", "Enabled", 1 if enabled else 0, 0, 0, 1]
+                f'/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled',
+                'com.victronenergy.BusItem',
+                'SetValue',
+                'v',
+                [dbus.Int32(1 if enabled else 0)]
             )
-            logging.debug(f"Saved device {mac_sanitized} enabled={enabled} to settings")
+            logging.debug(f"Updated device {mac_sanitized} enabled={enabled} in settings")
         except dbus.exceptions.DBusException as e:
-            # Setting might already exist, try to update it
+            # Setting doesn't exist, create it
             try:
+                # AddSetting signature: group (s), name (s), default (v), type (s), min (v), max (v)
                 self.bus.call_blocking(
                     'com.victronenergy.settings',
-                    f'/Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled',
-                    'com.victronenergy.BusItem',
-                    'SetValue',
-                    'v',
-                    [dbus.Int32(1 if enabled else 0)]
+                    '/Settings',
+                    'com.victronenergy.Settings',
+                    'AddSetting',
+                    'ssvsvv',
+                    [
+                        f"Devices/bleadvertisements/Device_{mac_sanitized}",  # group
+                        "Enabled",  # name
+                        dbus.Int32(1 if enabled else 0),  # defaultValue
+                        "i",  # itemType (integer)
+                        dbus.Int32(0),  # minimum
+                        dbus.Int32(1),  # maximum
+                    ]
                 )
-                logging.debug(f"Updated device {mac_sanitized} enabled={enabled} in settings")
+                logging.debug(f"Created device {mac_sanitized} enabled={enabled} in settings")
             except Exception as e2:
                 logging.warning(f"Failed to save device state for {mac_sanitized}: {e2}")
     
