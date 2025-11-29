@@ -233,7 +233,8 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path('/Connected', 1)
         
         # Add switch-specific paths (required for switch devices)
-        self.dbusservice.add_path('/State', 0x100)  # 0x100 = Connected (module-level state)
+        # Note: /State at root level is NOT needed for switch devices
+        # Individual switches have their own /SwitchableOutput/relay_*/State paths
         
         # Create a single switchable output for new device discovery toggle
         # Use relay_discovery identifier for clarity
