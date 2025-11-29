@@ -266,13 +266,13 @@ class BLEAdvertisementRouter:
         # Register device in settings (for GUI device list)
         settings = {
             "ClassAndVrmInstance": [
-                "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
+                "/Settings/Devices/switch.ble_advertisements/ClassAndVrmInstance",
                 "switch:110",
                 0,
                 0,
             ],
             "DiscoveryEnabled": [
-                "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+                "/Settings/Devices/switch.ble_advertisements/DiscoveryEnabled",
                 0,  # Default: OFF
                 0,
                 1,
@@ -344,17 +344,19 @@ class BLEAdvertisementRouter:
         GLib.timeout_add_seconds(600, self._update_heartbeat)
     
     def _migrate_settings(self):
-        """Migrate settings from old service name (com.victronenergy.switch.ble.advertisements) to new name (com.victronenergy.ble_advertisements)"""
+        """Migrate settings from old service name to new name"""
         old_paths = [
-            "/Settings/Devices/ble.advertisements/ClassAndVrmInstance",
-            "/Settings/Devices/ble.advertisements/DiscoveryEnabled",
-        ]
-        new_paths = [
             "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
             "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+            "/Settings/Devices/ble_router/ClassAndVrmInstance",
+            "/Settings/Devices/ble_router/DiscoveryEnabled",
+        ]
+        new_paths = [
+            "/Settings/Devices/switch.ble_advertisements/ClassAndVrmInstance",
+            "/Settings/Devices/switch.ble_advertisements/DiscoveryEnabled",
         ]
         
-        for old_path, new_path in zip(old_paths, new_paths):
+        for old_path in old_paths:
             try:
                 # Check if old settings exist
                 settings_obj = self.bus.get_object('com.victronenergy.settings', old_path)
@@ -362,6 +364,12 @@ class BLEAdvertisementRouter:
                 old_value = settings_iface.GetValue()
                 
                 if old_value is not None:
+                    # Determine which new path to use based on old path
+                    if 'ClassAndVrmInstance' in old_path:
+                        new_path = "/Settings/Devices/switch.ble_advertisements/ClassAndVrmInstance"
+                    else:
+                        new_path = "/Settings/Devices/switch.ble_advertisements/DiscoveryEnabled"
+                    
                     logging.info(f"Migrating settings from {old_path} to {new_path}: {old_value}")
                     
                     # Set the new path with the old value
