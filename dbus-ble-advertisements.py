@@ -264,9 +264,8 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
         self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
-        # Track discovered devices that should appear as switchable outputs
-        # Note: /SwitchableOutput is a container path, not a leaf - it's created implicitly by its children
-        # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
+        # Runtime cache of discovered devices for fast lookup in hot path
+        # Key: device_id (e.g., "mac_efc1119da391"), Value: {'relay_id', 'name', 'enabled'}
         self.discovered_devices: Dict[str, dict] = {}
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
@@ -414,31 +413,27 @@ class BLEAdvertisementRouter:
                 logging.warning(f"Error during settings migration from {old_path}: {e}")
     
     def _on_relay_state_changed(self, path: str, value: int):
-        """Callback when a discovered device relay state changes.
-        
-        The switch state IS the persistence - no need to save elsewhere.
-        """
+        """Callback when a discovered device relay state changes."""
         # Extract relay_id from path like "/SwitchableOutput/relay_efc1119da391/State"
         path_parts = path.split('/')
         if len(path_parts) < 3 or not path_parts[2].startswith('relay_'):
-            logging.warning(f"Unexpected path format in _on_relay_state_changed: {path}")
             return True
         
-        relay_id = path_parts[2].replace('relay_', '')  # e.g., "efc1119da391"
+        relay_id = path_parts[2].replace('relay_', '')
+        enabled = (value == 1)
         
-        # Find which device_id is mapped to this relay_id
-        for device_id, device_info in self.discovered_devices.items():
-            if device_info.get('relay_id') == relay_id:
-                enabled = (value == 1)
-                device_info['enabled'] = enabled
-                device_name = device_info['name']
-                logging.info(f"Device '{device_name}' routing: {'enabled' if enabled else 'disabled'}")
-                
-                # Update Status to match State (0x00 = off, 0x09 = on)
-                self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if enabled else 0x00
-                return True
+        # Update runtime cache
+        device_id = f"mac_{relay_id}"
+        if device_id in self.discovered_devices:
+            self.discovered_devices[device_id]['enabled'] = enabled
         
-        logging.warning(f"State change for relay_{relay_id} but no device mapped to it")
+        # Update Status to match State (0x00 = off, 0x09 = on)
+        self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0x09 if enabled else 0x00
+        
+        # Log the change
+        name_path = f'/SwitchableOutput/relay_{relay_id}/Name'
+        device_name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_id
+        logging.info(f"Device '{device_name}' routing: {'enabled' if enabled else 'disabled'}")
         return True
     
     def _on_settings_changed(self, setting, old_value, new_value):
