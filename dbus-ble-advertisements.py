@@ -265,8 +265,8 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
         # Runtime cache of discovered devices for fast lookup in hot path
-        # Key: device_id (e.g., "mac_efc1119da391"), Value: {'relay_id', 'name', 'enabled'}
-        self.discovered_devices: Dict[str, dict] = {}
+        # Key: MAC without colons (e.g., "efc1119da391"), Value: bool (enabled for routing)
+        self.discovered_devices: Dict[str, bool] = {}
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
@@ -422,10 +422,13 @@ class BLEAdvertisementRouter:
         relay_id = path_parts[2].replace('relay_', '')
         enabled = (value == 1)
         
-        # Update runtime cache
-        device_id = f"mac_{relay_id}"
-        if device_id in self.discovered_devices:
-            self.discovered_devices[device_id]['enabled'] = enabled
+        # If a switch is turned OFF while discovery is enabled, clear the cache
+        # This allows the device to be re-discovered if it appears again
+        if not enabled:
+            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
+            if discovery_enabled:
+                self.discovered_devices.clear()
+                logging.debug("Cleared device cache (switch disabled while discovery enabled)")
         
         # Status is always 0 (OK) - State indicates on/off
         self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0
@@ -445,8 +448,11 @@ class BLEAdvertisementRouter:
         """Callback when new device discovery toggle (SwitchableOutput/relay_discovery/State) changes"""
         # Handle both string and integer values from D-Bus
         enabled = (int(value) == 1) if isinstance(value, (int, str)) else bool(value)
-        print(f"DISCOVERY CALLBACK: path={path}, value={value}, enabled={enabled}", flush=True)
         logging.info(f"New device discovery changed to: {enabled}")
+        
+        # Clear the cache on any discovery toggle - it will repopulate naturally
+        self.discovered_devices.clear()
+        logging.debug("Cleared device cache (discovery toggled)")
         
         # Save to persistent settings
         self._settings['DiscoveryEnabled'] = value
@@ -501,17 +507,16 @@ class BLEAdvertisementRouter:
                         self.dbusservice[show_path] = 0
                         logging.info(f"Hidden enabled device {name} from switches pane")
             
-            # Remove disabled devices (can't modify during iteration)
+            # Remove disabled devices - delete their D-Bus paths directly
             for relay_id, name in relays_to_remove:
                 logging.info(f"Removing disabled device {name}")
-                device_id = f"mac_{relay_id}"
-                self._remove_discovered_device(device_id)
+                self._delete_relay_paths(relay_id)
         
         return True  # Accept the change
     
     
     def _update_device_name_if_exists(self, mac: str, name: str):
-        """Update the toggle name for a device if it's already been discovered
+        """Update the toggle name for a device if it's already been discovered.
         
         Only updates if discovery mode is enabled - no need to update names when not discovering.
         """
@@ -520,23 +525,13 @@ class BLEAdvertisementRouter:
         if not discovery_enabled:
             return
         
-        device_id = f"mac_{mac.replace(':', '').lower()}"
-        if device_id in self.discovered_devices:
-            device_info = self.discovered_devices[device_id]
-            relay_id = device_info['relay_id']
-            output_path = f'/SwitchableOutput/relay_{relay_id}'
-            
-            # Format: "Name (MAC)" - much more readable than just MAC
+        relay_id = mac.replace(':', '').lower()
+        name_path = f'/SwitchableOutput/relay_{relay_id}/Name'
+        
+        # Only update if the switch exists on D-Bus
+        if name_path in self.dbusservice:
             new_name = f"{name} ({mac})"
-            
-            # Update the D-Bus path
-            self.dbusservice[f'{output_path}/Name'] = new_name
-            
-            # Update in-memory cache
-            device_info['name'] = new_name
-            
-            # Note: Name is not persisted - it will be re-discovered from BLE advertisements
-            
+            self.dbusservice[name_path] = new_name
             logging.info(f"Updated device name: {new_name}")
     
     def _get_service_names_for_mac(self, mac: str) -> list:
@@ -551,7 +546,7 @@ class BLEAdvertisementRouter:
                     services.add(service_name)
         return sorted(list(services))
     
-    def _add_discovered_device(self, device_id: str, name: str, device_type: str):
+    def _add_discovered_device(self, mac: str, name: str):
         """
         Create a new switchable output for a discovered device.
         
@@ -564,13 +559,14 @@ class BLEAdvertisementRouter:
         
         Uses context manager to emit ItemsChanged signal so GUI picks up new switches.
         """
-        # Only add if discovery is enabled and device doesn't already exist
+        # MAC without colons as relay identifier
+        relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
+        
+        # Only add if discovery is enabled and device doesn't already exist in cache
         discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
-        if discovery_enabled == 0 or device_id in self.discovered_devices:
+        if discovery_enabled == 0 or relay_id in self.discovered_devices:
             return
         
-        # Use MAC address (without colons) as relay identifier
-        relay_id = device_id.replace('mac_', '')  # e.g., "efc1119da391"
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
         # Create new D-Bus paths for this device - enabled by default
@@ -591,31 +587,25 @@ class BLEAdvertisementRouter:
             ctx.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)
             ctx.add_path(f'{output_path}/Settings/PowerOnState', 1)
         
-        # Track in runtime cache
-        self.discovered_devices[device_id] = {
-            'relay_id': relay_id,
-            'name': name,
-            'type': device_type,
-            'enabled': True
-        }
+        # Track in runtime cache (enabled by default)
+        self.discovered_devices[relay_id] = True
         
         logging.info(f"Created switch for: {name} at {output_path}")
     
-    def _remove_discovered_device(self, device_id: str):
-        """Remove a discovered device's switchable output slot and delete all D-Bus paths"""
-        if device_id not in self.discovered_devices:
-            return
+    def _delete_relay_paths(self, relay_id: str):
+        """Delete all D-Bus paths for a relay switch.
         
-        device_info = self.discovered_devices[device_id]
-        relay_id = device_info['relay_id']
+        Args:
+            relay_id: MAC without colons (e.g., "efc1119da391")
+        """
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
-        # Delete all D-Bus paths for this relay to reduce GUI load
         paths_to_delete = [
             f'{output_path}/Name',
             f'{output_path}/Type',
             f'{output_path}/State',
             f'{output_path}/Status',
+            f'{output_path}/Current',
             f'{output_path}/Settings/CustomName',
             f'{output_path}/Settings/Type',
             f'{output_path}/Settings/ValidTypes',
@@ -623,6 +613,7 @@ class BLEAdvertisementRouter:
             f'{output_path}/Settings/ValidFunctions',
             f'{output_path}/Settings/Group',
             f'{output_path}/Settings/ShowUIControl',
+            f'{output_path}/Settings/PowerOnState',
         ]
         
         for path in paths_to_delete:
@@ -631,9 +622,6 @@ class BLEAdvertisementRouter:
                     del self.dbusservice[path]
                 except Exception as e:
                     logging.warning(f"Failed to delete path {path}: {e}")
-        
-        logging.info(f"Removed device {device_info['name']} and deleted all D-Bus paths")
-        del self.discovered_devices[device_id]
     
     def _on_device_state_changed(self, device_id: str, path: str, value: int):
         """DEPRECATED - now using _on_relay_state_changed"""
@@ -763,6 +751,9 @@ class BLEAdvertisementRouter:
                 # Parse just this service's registrations
                 self._parse_registrations(service_name, '/', xml)
                 self._update_emitters()
+                # Clear device cache when registrations change
+                self.discovered_devices.clear()
+                logging.debug("Cleared device cache (new registration)")
             else:
                 logging.debug(f"  - Service {service_name} has no ble_advertisements")
         except dbus.exceptions.DBusException as e:
@@ -817,6 +808,9 @@ class BLEAdvertisementRouter:
                     del self.emitters[path]
                 except:
                     pass
+            # Clear device cache when registrations change
+            self.discovered_devices.clear()
+            logging.debug("Cleared device cache (registration removed)")
     
     def _update_emitters(self):
         """Create or remove emitters based on registered filters"""
@@ -1130,51 +1124,33 @@ class BLEAdvertisementRouter:
         if not self.should_emit_update(mac, mfg_id, data):
             return
         
-        # Step 2: Check if there is an existing enabled relay switch for this MAC
-        device_id = f"mac_{mac.replace(':', '').lower()}"
-        device_exists = device_id in self.discovered_devices
-        device_enabled = device_exists and self.discovered_devices[device_id]['enabled']
+        # Step 2: Check if device is in our cache (fast path)
+        relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
         
-        # Debug logging for first few advertisements
-        if not hasattr(self, '_debug_count'):
-            self._debug_count = {}
-        if mac not in self._debug_count:
-            self._debug_count[mac] = 0
-        if self._debug_count[mac] < 2:
-            self._debug_count[mac] += 1
-            logging.info(f"DEBUG: {mac} - exists={device_exists}, enabled={device_enabled}, has_reg={has_registration}")
-        
-        if device_enabled:
-            # Step 3a: Device exists and is enabled -> route it
-            self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+        if relay_id in self.discovered_devices:
+            # Device is in cache - check if enabled
+            if self.discovered_devices[relay_id]:
+                # Enabled -> route the advertisement
+                self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+            # else: disabled in cache -> don't route
             return
         
-        if not device_exists:
-            # Step 3b: Device doesn't exist -> check if discovery is enabled AND there's a registration
-            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
-            if discovery_enabled and has_registration:
-                # Create an enabled switch for this MAC and then route it
-                device_name = self.device_names.get(mac, "")
-                
-                # Format: "Name (MAC)" or "service1, service2: MAC" if no name yet
-                if device_name:
-                    display_name = f"{device_name} ({mac})"
-                else:
-                    # No Bluetooth name yet - show which services are listening for this MAC
-                    service_names = self._get_service_names_for_mac(mac)
-                    if service_names:
-                        services_str = ", ".join(service_names)
-                        display_name = f"{services_str}: {mac}"
-                        logging.info(f"Creating device with service name prefix: {display_name}")
-                    else:
-                        display_name = mac
-                        logging.info(f"Creating device with MAC only (no services registered): {display_name}")
-                
-                self._add_discovered_device(device_id, display_name, "mac")
-                # Route the advertisement
-                self._emit_advertisement(mac, mfg_id, data, rssi, interface)
-            # else: discovery disabled or no registration -> return (do nothing)
-        # else: device exists but is disabled -> return (do nothing)
+        # Step 3: Not in cache - check if discovery is enabled AND there's a registration
+        discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
+        if discovery_enabled and has_registration:
+            # Create an enabled switch for this MAC
+            device_name = self.device_names.get(mac, "")
+            
+            # Format: "Name (MAC)" or just MAC if no name yet
+            if device_name:
+                display_name = f"{device_name} ({mac})"
+            else:
+                display_name = mac
+            
+            self._add_discovered_device(mac, display_name)
+            # Route the advertisement
+            self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+        # else: discovery disabled or no registration -> don't create switch
     
     def _emit_advertisement(self, mac: str, mfg_id: int, data: bytes, rssi: int, interface: str):
         """Emit D-Bus signals for an advertisement to all matching registration paths"""
