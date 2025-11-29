@@ -588,6 +588,10 @@ class BLEAdvertisementRouter:
             ctx.add_path(f'{output_path}/Settings/PowerOnState', 1)
         
         # Track in runtime cache (enabled by default)
+        # Safety valve: clear cache if it grows too large
+        if len(self.discovered_devices) > 1000:
+            self.discovered_devices.clear()
+            logging.warning("Cleared device cache (exceeded 1000 entries)")
         self.discovered_devices[relay_id] = True
         
         logging.info(f"Created switch for: {name} at {output_path}")
