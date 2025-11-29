@@ -267,18 +267,6 @@ class BLEAdvertisementRouter:
         # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
         self.discovered_devices: Dict[str, dict] = {}
         
-        # Allow list of MAC addresses to create switches for.
-        # This limits switch creation to the specific integration devices we
-        # currently care about (1 SeeLevel, 3 Orion-TRs). Other devices will
-        # still be routed at the advertisement level, but won't get switches
-        # until we explicitly expand this list.
-        self.mac_allow_list = {
-            "00a0508d9569",  # SeeLevel
-            "efc1119da391",  # Orion-TR 48v
-            "fb8d9fa69893",  # Orion-TR RO Power
-            "f0c6dcc8747a",  # Orion-TR 24v CPAP
-        }
-        
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
             "ClassAndVrmInstance": [
@@ -554,11 +542,6 @@ class BLEAdvertisementRouter:
                 name = device_info['name']
                 enabled = device_info.get('enabled', True)
                 
-                # TEMPORARY: Only restore switches for allow-listed MAC addresses
-                if relay_id not in self.mac_allow_list:
-                    logging.info(f"Skipping restoration of non-allowed device: {name} (MAC: {relay_id})")
-                    continue
-                
                 # Recreate the D-Bus paths for this device
                 output_path = f'/SwitchableOutput/relay_{relay_id}'
                 self.dbusservice.add_path(f'{output_path}/Name', name)
@@ -651,11 +634,6 @@ class BLEAdvertisementRouter:
         # device_id format is "mac_abc123", so we can use it directly after "mac_"
         relay_id = device_id.replace('mac_', '')  # e.g., "efc1119da391"
         
-        # TEMPORARY: Only create switches for allow-listed MAC addresses
-        if relay_id not in self.mac_allow_list:
-            logging.info(f"Skipping switch creation for non-allowed device: {name} (MAC: {relay_id})")
-            return
-        
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
         # Create new D-Bus paths for this device
@@ -727,41 +705,12 @@ class BLEAdvertisementRouter:
         logging.warning("_on_device_state_changed called but is deprecated")
         return True
     
-    def _scan_existing_services(self):
-        """Scan all existing D-Bus services for BLE registrations (called once at startup)"""
-        logging.info("=== INITIAL SERVICE SCAN STARTING ===")
-        logging.info(f"_scan_existing_services called at {time.time()}")
-        try:
-            logging.info("Scanning existing D-Bus services for BLE registrations...")
-            bus_obj = self.bus.get_object('org.freedesktop.DBus', '/')
-            bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
-            service_names = bus_iface.ListNames()
-            
-            # Check all com.victronenergy.* services (no hardcoded filter)
-            # Any service can register by creating /ble_advertisements/{service}/mfgr/{id} paths
-            victron_services = [s for s in service_names 
-                                if isinstance(s, str) and 
-                                s.startswith('com.victronenergy.') and 
-                                not s.startswith(':')]
-            
-            logging.info(f"Found {len(victron_services)} Victron services to check: {victron_services}")
-            
-            checked = 0
-            for service_name in victron_services:
-                checked += 1
-                logging.info(f"[{checked}/{len(victron_services)}] Checking {service_name}...")
-                self._check_service_registrations(service_name)
-            
-            logging.info(f"Initial scan complete - found {len(self.mfg_registrations)} mfgr registrations, {len(self.mac_registrations)} MAC registrations")
-            if self.mfg_registrations:
-                logging.info(f"Manufacturer IDs registered: {list(self.mfg_registrations.keys())}")
-            if self.mac_registrations:
-                logging.info(f"MAC addresses registered: {list(self.mac_registrations.keys())}")
-        except Exception as e:
-            logging.error(f"Error scanning existing services: {e}", exc_info=True)
-        
-        logging.info("=== INITIAL SERVICE SCAN COMPLETE - btmon processing should resume ===")
-        return False  # Don't repeat this idle callback
+    # _scan_existing_services was used in an earlier synchronous bootstrap
+    # implementation. It has been superseded by _schedule_initial_scan /
+    # _scan_next_service, which perform the same work incrementally via
+    # GLib.idle_add to avoid blocking the D-Bus mainloop. The old
+    # implementation is removed to prevent accidental reintroduction of
+    # blocking behavior.
 
     def _schedule_initial_scan(self):
         """Schedule a non-blocking initial registration scan.
@@ -907,69 +856,6 @@ class BLEAdvertisementRouter:
                     del self.emitters[path]
                 except:
                     pass
-    
-    def scan_registrations(self):
-        """Scan D-Bus for registration objects and update filters"""
-        logging.info("Starting registration scan...")
-        old_mfg_count = len(self.mfg_registrations)
-        old_mac_count = len(self.mac_registrations)
-        
-        self.mfg_registrations.clear()
-        self.mac_registrations.clear()
-        
-        try:
-            # Get D-Bus object manager
-            obj = self.bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
-            iface = dbus.Interface(obj, 'org.freedesktop.DBus')
-            
-            # Get all service names
-            names = iface.ListNames()
-            
-            # Only scan com.victronenergy.* services (skip system services to avoid blocking)
-            victron_services = [n for n in names if n.startswith('com.victronenergy.') and not n.startswith(':')]
-            logging.info(f"Scanning {len(victron_services)} Victron services for registrations...")
-            
-            # Look for registration paths in Victron services only
-            scanned_count = 0
-            for name in victron_services:
-                try:
-                    # Check if service has registration paths
-                    obj = self.bus.get_object(name, '/')
-                    
-                    # Introspect to find paths
-                    intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
-                    xml = intro.Introspect()
-                    
-                    # Parse for registration paths
-                    self._parse_registrations(name, '/', xml)
-                    scanned_count += 1
-                    
-                except dbus.exceptions.DBusException:
-                    # Service doesn't support introspection or path doesn't exist
-                    continue
-                except Exception as e:
-                    logging.debug(f"Error scanning {name}: {e}")
-                    continue
-        
-        except Exception as e:
-            logging.error(f"Error scanning registrations: {e}")
-        
-        # Create emitters for newly registered filters
-        self._update_emitters()
-        
-        logging.info(f"Registration scan completed: scanned {scanned_count} services")
-        
-        # Log changes
-        if len(self.mfg_registrations) != old_mfg_count or len(self.mac_registrations) != old_mac_count:
-            logging.info(f"Updated filters: {len(self.mfg_registrations)} manufacturer ID(s), {len(self.mac_registrations)} MAC(s)")
-            if self.mfg_registrations:
-                for mfg_id, paths in self.mfg_registrations.items():
-                    logging.info(f"  Manufacturer {mfg_id}: {len(paths)} registration(s)")
-            if self.mac_registrations:
-                for mac, paths in self.mac_registrations.items():
-                    logging.info(f"  MAC {mac}: {len(paths)} registration(s)")
-        
-        return True  # Continue periodic scanning
     
     def _update_emitters(self):
         """Create or remove emitters based on registered filters"""
