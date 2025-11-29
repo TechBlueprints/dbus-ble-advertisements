@@ -260,6 +260,15 @@ class BLEAdvertisementRouter:
         # Key: device_id (sanitized MAC or "mfgr_{id}"), Value: device info
         self.discovered_devices: Dict[str, dict] = {}
         
+        # TEMPORARY: Allow list of MAC addresses to create switches for
+        # Only these 4 devices will get switches created
+        self.mac_allow_list = {
+            '00a0508d9569',  # SeeLevel
+            'efc1119da391',  # Orion-TR
+            'fb8d9fa69893',  # Orion-TR
+            'f0c6dcc8747a',  # Orion-TR
+        }
+        
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
             "ClassAndVrmInstance": [
@@ -620,6 +629,12 @@ class BLEAdvertisementRouter:
         # Use MAC address (without colons) as relay identifier
         # device_id format is "mac_abc123", so we can use it directly after "mac_"
         relay_id = device_id.replace('mac_', '')  # e.g., "efc1119da391"
+        
+        # TEMPORARY: Only create switches for allow-listed MAC addresses
+        if relay_id not in self.mac_allow_list:
+            logging.info(f"Skipping switch creation for non-allowed device: {name} (MAC: {relay_id})")
+            return
+        
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
         # Create new D-Bus paths for this device
