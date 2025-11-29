@@ -443,7 +443,8 @@ class BLEAdvertisementRouter:
     
     def _on_discovery_changed(self, path, value):
         """Callback when new device discovery toggle (SwitchableOutput/relay_discovery/State) changes"""
-        enabled = (value == 1)
+        # Handle both string and integer values from D-Bus
+        enabled = (int(value) == 1) if isinstance(value, (int, str)) else bool(value)
         logging.info(f"New device discovery changed to: {enabled}")
         
         # Save to persistent settings
