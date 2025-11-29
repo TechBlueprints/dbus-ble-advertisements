@@ -557,6 +557,8 @@ class BLEAdvertisementRouter:
         3. Device doesn't already have a switch
         
         New devices are enabled by default.
+        
+        Uses context manager to emit ItemsChanged signal so GUI picks up new switches.
         """
         # Only add if discovery is enabled and device doesn't already exist
         discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State']
@@ -568,20 +570,22 @@ class BLEAdvertisementRouter:
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
         # Create new D-Bus paths for this device - enabled by default
-        self.dbusservice.add_path(f'{output_path}/Name', name)
-        self.dbusservice.add_path(f'{output_path}/Type', 1)  # 1 = toggle
-        self.dbusservice.add_path(f'{output_path}/State', 1, writeable=True,
-                                   onchangecallback=self._on_relay_state_changed)
-        self.dbusservice.add_path(f'{output_path}/Status', 0)  # 0 = OK
-        self.dbusservice.add_path(f'{output_path}/Current', 0)
-        self.dbusservice.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
-        self.dbusservice.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
-        self.dbusservice.add_path(f'{output_path}/Settings/ValidTypes', 2)
-        self.dbusservice.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
-        self.dbusservice.add_path(f'{output_path}/Settings/ValidFunctions', 4)
-        self.dbusservice.add_path(f'{output_path}/Settings/Group', '', writeable=True)
-        self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)
-        self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)
+        # Use context manager to emit ItemsChanged signal when done
+        with self.dbusservice as ctx:
+            ctx.add_path(f'{output_path}/Name', name)
+            ctx.add_path(f'{output_path}/Type', 1)  # 1 = toggle
+            ctx.add_path(f'{output_path}/State', 1, writeable=True,
+                         onchangecallback=self._on_relay_state_changed)
+            ctx.add_path(f'{output_path}/Status', 0)  # 0 = OK
+            ctx.add_path(f'{output_path}/Current', 0)
+            ctx.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
+            ctx.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ValidTypes', 2)
+            ctx.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ValidFunctions', 4)
+            ctx.add_path(f'{output_path}/Settings/Group', '', writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/PowerOnState', 1)
         
         # Track in runtime cache
         self.discovered_devices[device_id] = {
