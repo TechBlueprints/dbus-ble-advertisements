@@ -140,7 +140,7 @@ if [ "$FRESH_INSTALL" != true ]; then
     # Wait a moment for D-Bus to be ready after restart
     sleep 2
     
-    DISCOVERY_STATE=$(dbus -y com.victronenergy.switch.ble.advertisements /SwitchableOutput/relay_discovery/State GetValue 2>/dev/null || echo "")
+    DISCOVERY_STATE=$(dbus -y com.victronenergy.ble_advertisements /SwitchableOutput/relay_discovery/State GetValue 2>/dev/null || echo "")
     if [ "$DISCOVERY_STATE" = "0" ]; then
         echo "⚠️  WARNING: BLE Router discovery is currently DISABLED"
         echo ""

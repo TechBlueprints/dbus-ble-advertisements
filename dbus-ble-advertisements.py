@@ -203,8 +203,11 @@ class BLEAdvertisementRouter:
     def __init__(self, bus):
         self.bus = bus
         
-        # Create a BusName for the emitters to use
-        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble.advertisements', bus)
+        # Migrate settings from old service name if needed
+        self._migrate_settings()
+        
+        # Create a BusName for the emitters to use (no .switch prefix - any service can have switchable outputs)
+        self.bus_name = dbus.service.BusName('com.victronenergy.ble_advertisements', bus)
         
         # Create root object to provide GetVersion, GetStatus, GetHeartbeat methods
         self.root_obj = RootObject(self.bus_name)
@@ -214,14 +217,14 @@ class BLEAdvertisementRouter:
         from vedbus import VeDbusService
         from settingsdevice import SettingsDevice
         
-        # Create as a switch device so it appears in the device list with settings
-        self.dbusservice = VeDbusService('com.victronenergy.switch.ble.advertisements', bus, register=False)
+        # Create as a device with switchable outputs so it appears in the device list
+        self.dbusservice = VeDbusService('com.victronenergy.ble_advertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
         self.dbusservice.add_path('/Mgmt/ProcessVersion', '1.0.0')
         self.dbusservice.add_path('/Mgmt/Connection', 'BLE Router')
-        self.dbusservice.add_path('/DeviceInstance', 50)
+        self.dbusservice.add_path('/DeviceInstance', 110)
         self.dbusservice.add_path('/ProductId', 0xFFFF)
         self.dbusservice.add_path('/ProductName', 'BLE Advertisement Router')
         self.dbusservice.add_path('/CustomName', 'BLE Router')
@@ -338,6 +341,49 @@ class BLEAdvertisementRouter:
         
         # Update heartbeat every 10 minutes
         GLib.timeout_add_seconds(600, self._update_heartbeat)
+    
+    def _migrate_settings(self):
+        """Migrate settings from old service name (com.victronenergy.switch.ble.advertisements) to new name (com.victronenergy.ble_advertisements)"""
+        old_paths = [
+            "/Settings/Devices/ble.advertisements/ClassAndVrmInstance",
+            "/Settings/Devices/ble.advertisements/DiscoveryEnabled",
+        ]
+        new_paths = [
+            "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
+            "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+        ]
+        
+        for old_path, new_path in zip(old_paths, new_paths):
+            try:
+                # Check if old settings exist
+                settings_obj = self.bus.get_object('com.victronenergy.settings', old_path)
+                settings_iface = dbus.Interface(settings_obj, 'com.victronenergy.BusItem')
+                old_value = settings_iface.GetValue()
+                
+                if old_value is not None:
+                    logging.info(f"Migrating settings from {old_path} to {new_path}: {old_value}")
+                    
+                    # Set the new path with the old value
+                    try:
+                        new_obj = self.bus.get_object('com.victronenergy.settings', new_path)
+                        new_iface = dbus.Interface(new_obj, 'com.victronenergy.BusItem')
+                        new_iface.SetValue(old_value)
+                        logging.info(f"Successfully migrated settings to {new_path}")
+                    except Exception as e:
+                        logging.info(f"New settings path doesn't exist yet (will be created): {e}")
+                    
+                    # Delete the old path
+                    try:
+                        settings_obj.Delete()
+                        logging.info(f"Deleted old settings path: {old_path}")
+                    except Exception as e:
+                        logging.warning(f"Could not delete old settings path {old_path}: {e}")
+                        
+            except dbus.exceptions.DBusException:
+                # Old settings don't exist - this is fine (fresh install or already migrated)
+                logging.debug(f"No old settings to migrate from {old_path}")
+            except Exception as e:
+                logging.warning(f"Error during settings migration from {old_path}: {e}")
     
     def _on_relay_state_changed(self, path: str, value: int):
         """Callback when a discovered device relay state changes"""
