@@ -799,8 +799,9 @@ class BLEAdvertisementRouter:
         
         service_name = self._pending_scan_services.pop(0)
         logging.debug(
-            f"Async scan: checking {service_name} "
-            f\"({len(self._pending_scan_services)} remaining)\"
+            "Async scan: checking %s (%d remaining)",
+            service_name,
+            len(self._pending_scan_services),
         )
         # Use a short timeout to further reduce risk of blocking the mainloop.
         try:
