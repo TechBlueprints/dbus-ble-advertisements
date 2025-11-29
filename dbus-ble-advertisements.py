@@ -266,7 +266,7 @@ class BLEAdvertisementRouter:
         settings = {
             "ClassAndVrmInstance": [
                 "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
-                "switch:50",
+                "switch:110",
                 0,
                 0,
             ],
