@@ -1261,6 +1261,8 @@ class BLEAdvertisementRouter:
                 
                 # If payload is identical and not enough time has passed, skip
                 if previous == data and (now - last_time) < self._repeat_interval:
+                    time_remaining = self._repeat_interval - (now - last_time)
+                    logging.debug(f"Discarding unchanged packet from {mac} (next route in {time_remaining:.0f}s)")
                     return  # Filter out repeated identical packet
             
             # Route the advertisement and update cache
