@@ -610,25 +610,30 @@ class BLEAdvertisementRouter:
         
         if not new_state:
             # When turned off, reset to default and turn back on
-            try:
-                default_interval = DEFAULT_REPEAT_INTERVAL
-                default_slider = default_interval // 10  # 600 -> 60
-                
-                self._repeat_interval = default_interval
-                self._settings['RepeatInterval'] = default_interval
-                
-                self.dbusservice['/SwitchableOutput/relay_repeat_interval/Dimming'] = default_slider
-                self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = default_interval
-                self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Duplicate Resend Delay: {default_interval}s'
-                
-                # Turn it back on automatically after resetting
-                self.dbusservice['/SwitchableOutput/relay_repeat_interval/State'] = 1
-                
-                # Clear the cache
-                self.discovered_devices.clear()
-                logging.info(f"Reset Duplicate Resend Delay to default ({default_interval}s)")
-            except Exception as e:
-                logging.error(f"Failed to reset repeat interval to default: {e}")
+            # Use idle_add to set state back to 1 after this callback returns
+            def reset_to_default():
+                try:
+                    default_interval = DEFAULT_REPEAT_INTERVAL
+                    default_slider = default_interval // 10  # 600 -> 60
+                    
+                    self._repeat_interval = default_interval
+                    self._settings['RepeatInterval'] = default_interval
+                    
+                    self.dbusservice['/SwitchableOutput/relay_repeat_interval/Dimming'] = default_slider
+                    self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = default_interval
+                    self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Duplicate Resend Delay: {default_interval}s'
+                    
+                    # Turn it back on automatically after resetting
+                    self.dbusservice['/SwitchableOutput/relay_repeat_interval/State'] = 1
+                    
+                    # Clear the cache
+                    self.discovered_devices.clear()
+                    logging.info(f"Reset Duplicate Resend Delay to default ({default_interval}s)")
+                except Exception as e:
+                    logging.error(f"Failed to reset repeat interval to default: {e}")
+                return False  # Don't repeat
+            
+            GLib.idle_add(reset_to_default)
         return True
     
     def _on_log_interval_state_changed(self, path, value):
