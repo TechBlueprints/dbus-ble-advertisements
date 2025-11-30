@@ -264,9 +264,37 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
         self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
+        # Add "Repeat Interval" slider - controls how long to ignore repeated identical packets
+        # Range: 0-1000 seconds, increments of 10. 0 = no filtering (route all packets)
+        repeat_path = '/SwitchableOutput/relay_repeat_interval'
+        self.dbusservice.add_path(f'{repeat_path}/Name', '* Repeat Interval (seconds)')
+        self.dbusservice.add_path(f'{repeat_path}/Type', 2)  # 2 = dimmer/slider
+        self.dbusservice.add_path(f'{repeat_path}/State', 60, writeable=True,
+                                   onchangecallback=self._on_repeat_interval_changed)
+        self.dbusservice.add_path(f'{repeat_path}/Status', 0x00)
+        self.dbusservice.add_path(f'{repeat_path}/Current', 0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/CustomName', '', writeable=True)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Type', 2, writeable=True)  # 2 = dimmer
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidTypes', 4)  # Bitmask: bit 2 set = dimmer (0b100 = 4)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Function', 2, writeable=True)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidFunctions', 4)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Group', '', writeable=True)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default, shown when discovery enabled
+        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMin', 0.0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMax', 1000.0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/StepSize', 10.0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Decimals', 0)
+        
         # Runtime cache of discovered devices for fast lookup in hot path
-        # Key: MAC without colons (e.g., "efc1119da391"), Value: bool (enabled for routing)
-        self.discovered_devices: Dict[str, bool] = {}
+        # Key: MAC without colons (e.g., "efc1119da391")
+        # Value: dict with:
+        #   - route: bool (enabled for routing)
+        #   - previous: bytes (last routed payload, only if route=True)
+        #   - timestamp: float (last route time, only if route=True)
+        self.discovered_devices: Dict[str, dict] = {}
+        
+        # Repeat interval in seconds (cached from slider for fast access)
+        self._repeat_interval: int = 60
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
@@ -281,6 +309,12 @@ class BLEAdvertisementRouter:
                 1,  # Default: ON
                 0,
                 1,
+            ],
+            "RepeatInterval": [
+                "/Settings/Devices/ble_advertisements/RepeatInterval",
+                60,  # Default: 60 seconds
+                0,
+                1000,
             ],
         }
         self._settings = SettingsDevice(
@@ -303,6 +337,14 @@ class BLEAdvertisementRouter:
         # simple switch implementations. Only State reflects on/off.
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
+            # Show repeat interval slider when discovery is enabled
+            self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 1
+        
+        # Restore repeat interval from settings
+        repeat_interval = self._settings['RepeatInterval']
+        self._repeat_interval = int(repeat_interval)
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/State'] = repeat_interval
+        logging.info(f"Repeat interval set to {self._repeat_interval} seconds from saved settings")
         
         # Note: Device switches are created dynamically as BLE advertisements arrive.
         # Enabled/disabled state per device is stored in D-Bus settings and loaded
@@ -439,6 +481,19 @@ class BLEAdvertisementRouter:
         logging.debug(f"Setting changed: {setting} = {new_value}")
         # Settings are already updated by SettingsDevice, no action needed
     
+    def _on_repeat_interval_changed(self, path, value):
+        """Callback when repeat interval slider changes"""
+        new_interval = int(value)
+        self._repeat_interval = new_interval
+        self._settings['RepeatInterval'] = new_interval
+        logging.info(f"Repeat interval changed to {new_interval} seconds")
+        
+        # Clear the cache so all devices get fresh timestamps
+        self.discovered_devices.clear()
+        logging.debug("Cleared device cache (repeat interval changed)")
+        
+        return True
+    
     def _on_discovery_changed(self, path, value):
         """Callback when new device discovery toggle (SwitchableOutput/relay_discovery/State) changes"""
         # Handle both string and integer values from D-Bus
@@ -464,8 +519,12 @@ class BLEAdvertisementRouter:
                        and 'relay_discovery' not in p]
         
         if enabled:
-            # Discovery enabled: show all device toggles
+            # Discovery enabled: show all device toggles and repeat interval slider
             logging.info("Discovery enabled - showing all device switches")
+            
+            # Show repeat interval slider
+            self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 1
+            
             for state_path in relay_paths:
                 relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
                 output_path = f'/SwitchableOutput/{relay_part}'
@@ -477,8 +536,11 @@ class BLEAdvertisementRouter:
                     name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_part
                     logging.info(f"Made {name} visible in switches pane")
         else:
-            # Discovery disabled: hide ALL device switches (keep their state for when re-enabled)
+            # Discovery disabled: hide ALL device switches and repeat interval slider
             logging.info("Discovery disabled - hiding all device switches")
+            
+            # Hide repeat interval slider
+            self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 0
             
             for state_path in relay_paths:
                 relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
@@ -512,7 +574,7 @@ class BLEAdvertisementRouter:
         if name_path in self.dbusservice:
             new_name = f"{name} ({mac})"
             self.dbusservice[name_path] = new_name
-            logging.info(f"Updated device name: {new_name}")
+            logging.debug(f"Updated device name: {new_name}")
     
     def _get_service_names_for_mac(self, mac: str) -> list:
         """Get list of service names that are registered for this MAC address"""
@@ -554,7 +616,11 @@ class BLEAdvertisementRouter:
         if f'{output_path}/State' in self.dbusservice:
             # Switch exists on D-Bus but not in cache - add to cache
             state = self.dbusservice[f'{output_path}/State']
-            self.discovered_devices[relay_id] = (state == 1)
+            self.discovered_devices[relay_id] = {
+                'route': (state == 1),
+                'previous': None,
+                'timestamp': 0.0
+            }
             return
         
         # Create new D-Bus paths for this device - enabled by default
@@ -575,14 +641,18 @@ class BLEAdvertisementRouter:
             ctx.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)
             ctx.add_path(f'{output_path}/Settings/PowerOnState', 1)
         
-        # Track in runtime cache (enabled by default)
+        # Track in runtime cache (enabled by default, no previous payload yet)
         # Safety valve: clear cache if it grows too large
         if len(self.discovered_devices) > 1000:
             self.discovered_devices.clear()
             logging.warning("Cleared device cache (exceeded 1000 entries)")
-        self.discovered_devices[relay_id] = True
+        self.discovered_devices[relay_id] = {
+            'route': True,
+            'previous': None,
+            'timestamp': 0.0
+        }
         
-        logging.info(f"Created switch for: {name} at {output_path}")
+        logging.info(f"Discovered new device: {name}")
     
     def _delete_relay_paths(self, relay_id: str):
         """Delete all D-Bus paths for a relay switch.
@@ -1114,13 +1184,29 @@ class BLEAdvertisementRouter:
         
         # Step 2: Check if device is in our cache (fast path)
         relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
+        now = time.time()
         
         if relay_id in self.discovered_devices:
-            # Device is in cache - check if enabled
-            if self.discovered_devices[relay_id]:
-                # Enabled -> route the advertisement
-                self._emit_advertisement(mac, mfg_id, data, rssi, interface)
-            # else: disabled in cache -> don't route
+            cache_entry = self.discovered_devices[relay_id]
+            
+            # Device is in cache - check if enabled for routing
+            if not cache_entry['route']:
+                # Disabled -> don't route
+                return
+            
+            # Check if we should filter this as a repeat
+            if self._repeat_interval > 0:
+                previous = cache_entry.get('previous')
+                last_time = cache_entry.get('timestamp', 0.0)
+                
+                # If payload is identical and not enough time has passed, skip
+                if previous == data and (now - last_time) < self._repeat_interval:
+                    return  # Filter out repeated identical packet
+            
+            # Route the advertisement and update cache
+            cache_entry['previous'] = data
+            cache_entry['timestamp'] = now
+            self._emit_advertisement(mac, mfg_id, data, rssi, interface)
             return
         
         # Step 3: Not in cache - check if discovery is enabled AND there's a registration
@@ -1136,6 +1222,12 @@ class BLEAdvertisementRouter:
                 display_name = mac
             
             self._add_discovered_device(mac, display_name)
+            
+            # Update cache with this payload
+            if relay_id in self.discovered_devices:
+                self.discovered_devices[relay_id]['previous'] = data
+                self.discovered_devices[relay_id]['timestamp'] = now
+            
             # Route the advertisement
             self._emit_advertisement(mac, mfg_id, data, rssi, interface)
         # else: discovery disabled or no registration -> don't create switch
@@ -1196,10 +1288,11 @@ class BLEAdvertisementRouter:
                             self._missing_emitter_logged.add(path)
                             logging.warning(f"No emitter for registered path: {path}")
             
+            # Only log at debug level - we log at info when discovering new devices
             if emitted_count > 0:
                 name_str = f" name='{device_name}'" if device_name else ""
                 pid_str = f" pid={product_id:#06x}" if product_id is not None else ""
-                logging.info(f"Broadcast: {mac}{name_str} mfg={mfg_id:#06x}{pid_str} len={len(data)} rssi={rssi} if={interface} → {emitted_count} path(s)")
+                logging.debug(f"Routed: {mac}{name_str} mfg={mfg_id:#06x}{pid_str} len={len(data)} → {emitted_count} path(s)")
         except Exception as e:
             logging.error(f"Failed to emit signal for {mac}: {e}")
     
