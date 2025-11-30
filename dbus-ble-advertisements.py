@@ -897,23 +897,23 @@ class BLEAdvertisementRouter:
                 
                 # MAC address: /addr/{mac}
                 elif '/addr/' in path:
-                # Extract MAC from path
-                # e.g., /ble_advertisements/orion_tr/addr/ef_c1_11_9d_a3_91 or /addr/EFC1119DA391
-                parts = path.split('/addr/')
-                if len(parts) == 2:
-                    mac_part = parts[1]
-                    # Remove underscores first (some services use them instead of colons)
-                    mac_part = mac_part.replace('_', '')
-                    # Convert to standard format with colons
-                    if ':' not in mac_part and len(mac_part) == 12:
-                        mac = ':'.join([mac_part[i:i+2] for i in range(0, 12, 2)])
-                    else:
-                        mac = mac_part
-                    mac = mac.upper()
-                    if mac not in self.mac_registrations:
-                        self.mac_registrations[mac] = set()
-                    self.mac_registrations[mac].add(path)
-                    logging.debug(f"Registered {path} from {service_name} (MAC: {mac})")
+                    # Extract MAC from path
+                    # e.g., /ble_advertisements/orion_tr/addr/ef_c1_11_9d_a3_91 or /addr/EFC1119DA391
+                    parts = path.split('/addr/')
+                    if len(parts) == 2:
+                        mac_part = parts[1]
+                        # Remove underscores first (some services use them instead of colons)
+                        mac_part = mac_part.replace('_', '')
+                        # Convert to standard format with colons
+                        if ':' not in mac_part and len(mac_part) == 12:
+                            mac = ':'.join([mac_part[i:i+2] for i in range(0, 12, 2)])
+                        else:
+                            mac = mac_part
+                        mac = mac.upper()
+                        if mac not in self.mac_registrations:
+                            self.mac_registrations[mac] = set()
+                        self.mac_registrations[mac].add(path)
+                        logging.debug(f"Registered {path} from {service_name} (MAC: {mac})")
             
             # Recursively check child nodes
             for node in root.findall('node'):
