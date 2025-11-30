@@ -422,8 +422,8 @@ class BLEAdvertisementRouter:
         relay_id = path_parts[2].replace('relay_', '')
         enabled = (value == 1)
         
-        # Update the cache to reflect the new state (don't clear it)
-        self.discovered_devices[relay_id] = enabled
+        # Clear cache - routing rules changed, let it repopulate
+        self.discovered_devices.clear()
         
         # Status is always 0 (OK) - State indicates on/off
         self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0
