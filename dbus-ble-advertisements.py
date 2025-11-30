@@ -624,13 +624,14 @@ class BLEAdvertisementRouter:
             bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
             service_names = bus_iface.ListNames()
             
-            # Scan all com.victronenergy.* services (skip system services and unique names)
+            # Scan all com.victronenergy.* services (skip system services, unique names, and ourselves)
             # Using async introspection so slow services won't block the mainloop
             self._pending_scan_services = [
                 s for s in service_names
                 if isinstance(s, str)
                 and s.startswith('com.victronenergy.')
                 and not s.startswith(':')
+                and s != 'com.victronenergy.switch.bleadvertisements'  # Skip ourselves
             ]
             logging.info(
                 f"Queued {len(self._pending_scan_services)} services for async registration scan"
