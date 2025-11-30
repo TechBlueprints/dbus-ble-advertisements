@@ -5,9 +5,6 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
 #
-# Or:
-#   wget -qO- https://raw.githubusercontent.com/TechBlueprints/dbus-ble-advertisements/main/install.sh | bash
-#
 
 set -e
 
