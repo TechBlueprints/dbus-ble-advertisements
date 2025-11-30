@@ -44,6 +44,7 @@ import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
+DEFAULT_REPEAT_INTERVAL = 600  # 10 minutes - default for deduplication of identical packets
 DEFAULT_LOG_INTERVAL = 3000  # 50 minutes - default (max) for logging routing activity per device
 # Device enabled states are stored in D-Bus settings at:
 # /Settings/Devices/ble_advertisements/Device_{mac_sanitized}/Enabled
