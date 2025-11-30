@@ -482,35 +482,20 @@ class BLEAdvertisementRouter:
                     name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_part
                     logging.info(f"Made {name} visible in switches pane")
         else:
-            # Discovery disabled: remove disabled devices, hide enabled ones
-            logging.info("Discovery disabled - removing disabled devices, hiding enabled ones")
-            relays_to_remove = []
+            # Discovery disabled: hide ALL device switches (keep their state for when re-enabled)
+            logging.info("Discovery disabled - hiding all device switches")
             
             for state_path in relay_paths:
                 relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
-                relay_id = relay_part.replace('relay_', '')
                 output_path = f'/SwitchableOutput/{relay_part}'
                 name_path = f'{output_path}/Name'
-                name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_id
+                show_path = f'{output_path}/Settings/ShowUIControl'
+                name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_part
                 
-                # Get current state from D-Bus
-                state = self.dbusservice[state_path]
-                device_enabled = (state == 1)
-                
-                if not device_enabled:
-                    # Device is disabled: mark for removal
-                    relays_to_remove.append((relay_id, name))
-                else:
-                    # Device is enabled: just hide it
-                    show_path = f'{output_path}/Settings/ShowUIControl'
-                    if show_path in self.dbusservice:
-                        self.dbusservice[show_path] = 0
-                        logging.info(f"Hidden enabled device {name} from switches pane")
-            
-            # Remove disabled devices - delete their D-Bus paths directly
-            for relay_id, name in relays_to_remove:
-                logging.info(f"Removing disabled device {name}")
-                self._delete_relay_paths(relay_id)
+                # Hide the switch but keep it (preserves enabled/disabled state)
+                if show_path in self.dbusservice:
+                    self.dbusservice[show_path] = 0
+                    logging.info(f"Hidden device {name} from switches pane")
         
         return True  # Accept the change
     
