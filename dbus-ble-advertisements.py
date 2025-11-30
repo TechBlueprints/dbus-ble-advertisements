@@ -644,12 +644,19 @@ class BLEAdvertisementRouter:
             bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
             service_names = bus_iface.ListNames()
             
-            # Only scan com.victronenergy.* services (skip system services)
+            # Only scan services that could have BLE advertisement registrations
+            # Known client services that register for BLE advertisements:
+            # - com.victronenergy.switch.seelevel (SeeLevel tanks)
+            # - com.victronenergy.orion_tr (Orion TR DC-DC)
+            # Skip all others to avoid blocking introspection timeouts
+            likely_clients = [
+                'com.victronenergy.switch.seelevel',
+                'com.victronenergy.orion_tr',
+            ]
             self._pending_scan_services = [
                 s for s in service_names
                 if isinstance(s, str)
-                and s.startswith('com.victronenergy.')
-                and not s.startswith(':')
+                and s in likely_clients
             ]
             logging.info(
                 f"Queued {len(self._pending_scan_services)} services for async registration scan"
