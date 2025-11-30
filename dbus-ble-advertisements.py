@@ -47,13 +47,13 @@ from gi.repository import GLib
 HEARTBEAT_INTERVAL = 600  # 10 minutes
 REGISTRATION_SCAN_INTERVAL = 30  # Scan for new registrations every 30 seconds
 # Device enabled states are stored in D-Bus settings at:
-# /Settings/Devices/bleadvertisements/Device_{mac_sanitized}/Enabled
+# /Settings/Devices/ble_advertisements/Device_{mac_sanitized}/Enabled
 
 
 class AdvertisementEmitter(dbus.service.Object):
     """D-Bus object that emits signals for a specific manufacturer or MAC"""
     
-    @dbus.service.signal(dbus_interface='com.victronenergy.switch.bleadvertisements',
+    @dbus.service.signal(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          signature='sqaynss')
     def Advertisement(self, mac, manufacturer_id, data, rssi, interface, name):
         """Signal emitted when a matching BLE advertisement is received
@@ -76,13 +76,13 @@ class RootObject(dbus.service.Object):
         dbus.service.Object.__init__(self, bus_name, '/ble_advertisements')
         self.heartbeat = time.time()
     
-    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          in_signature='', out_signature='s')
     def GetVersion(self):
         """Return service version"""
         return "1.0.0"
     
-    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          in_signature='', out_signature='s')
     def GetStatus(self):
         """Return service status based on heartbeat"""
@@ -92,7 +92,7 @@ class RootObject(dbus.service.Object):
         else:
             return "stale"
     
-    @dbus.service.method(dbus_interface='com.victronenergy.switch.bleadvertisements',
+    @dbus.service.method(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          in_signature='', out_signature='d')
     def GetHeartbeat(self):
         """Return last heartbeat timestamp"""
@@ -209,7 +209,7 @@ class BLEAdvertisementRouter:
         self._migrate_settings()
         
         # Create a BusName for the emitters to use (with .switch prefix for GUI recognition)
-        self.bus_name = dbus.service.BusName('com.victronenergy.switch.bleadvertisements', bus)
+        self.bus_name = dbus.service.BusName('com.victronenergy.switch.ble_advertisements', bus)
         
         # Create root object to provide GetVersion, GetStatus, GetHeartbeat methods
         self.root_obj = RootObject(self.bus_name)
@@ -220,7 +220,7 @@ class BLEAdvertisementRouter:
         from settingsdevice import SettingsDevice
         
         # Create as a device with switchable outputs so it appears in the device list
-        self.dbusservice = VeDbusService('com.victronenergy.switch.bleadvertisements', bus, register=False)
+        self.dbusservice = VeDbusService('com.victronenergy.switch.ble_advertisements', bus, register=False)
         
         # Add mandatory paths for Venus OS device
         self.dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -271,13 +271,13 @@ class BLEAdvertisementRouter:
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
             "ClassAndVrmInstance": [
-                "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
+                "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
                 "switch:110",
                 0,
                 0,
             ],
             "DiscoveryEnabled": [
-                "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
+                "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
                 1,  # Default: ON
                 0,
                 1,
@@ -374,10 +374,10 @@ class BLEAdvertisementRouter:
             "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
         ]
         new_paths = [
-            "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
-            "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
-            "/Settings/Devices/bleadvertisements/ClassAndVrmInstance",
-            "/Settings/Devices/bleadvertisements/DiscoveryEnabled",
+            "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
+            "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
+            "/Settings/Devices/ble_advertisements/ClassAndVrmInstance",
+            "/Settings/Devices/ble_advertisements/DiscoveryEnabled",
         ]
         
         for old_path, new_path in zip(old_paths, new_paths):
@@ -631,7 +631,7 @@ class BLEAdvertisementRouter:
                 if isinstance(s, str)
                 and s.startswith('com.victronenergy.')
                 and not s.startswith(':')
-                and s != 'com.victronenergy.switch.bleadvertisements'  # Skip ourselves
+                and s != 'com.victronenergy.switch.ble_advertisements'  # Skip ourselves
             ]
             logging.info(
                 f"Queued {len(self._pending_scan_services)} services for async registration scan"
@@ -1016,7 +1016,7 @@ class BLEAdvertisementRouter:
         
         return False
     
-    @dbus.service.signal(dbus_interface='com.victronenergy.switch.bleadvertisements',
+    @dbus.service.signal(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          signature='sqayn')
     def Advertisement(self, mac, manufacturer_id, data, rssi):
         """

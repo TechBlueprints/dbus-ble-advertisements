@@ -75,7 +75,7 @@ bash install-service.sh
 
 ### Service Name
 
-**`com.victronenergy.switch.bleadvertisements`**
+**`com.victronenergy.switch.ble_advertisements`**
 - Service for BLE advertisement routing and UI integration
 - **Use this for service availability checks**
 - Appears in Venus OS device list
@@ -86,7 +86,7 @@ bash install-service.sh
 
 ### Signal
 ```
-Interface: com.victronenergy.switch.bleadvertisements
+Interface: com.victronenergy.switch.ble_advertisements
 Signal: Advertisement(string mac, uint16 manufacturer_id, array of bytes data, int16 rssi, string interface, string name)
 ```
 
@@ -173,7 +173,7 @@ def advertisement_callback(mac, mfg_id, data, rssi, interface, name):
 bus.add_signal_receiver(
     advertisement_callback,
     signal_name='Advertisement',
-    dbus_interface='com.victronenergy.switch.bleadvertisements',
+    dbus_interface='com.victronenergy.switch.ble_advertisements',
     path='/ble-advertisements/orion-tr/mfgr/737'  # Same path as registration!
 )
 

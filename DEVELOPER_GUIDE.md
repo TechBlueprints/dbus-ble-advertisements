@@ -127,13 +127,13 @@ def check_router_available():
         proxy = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
         dbus_iface = dbus.Interface(proxy, 'org.freedesktop.DBus')
         
-        if 'com.victronenergy.switch.bleadvertisements' not in dbus_iface.ListNames():
+        if 'com.victronenergy.switch.ble_advertisements' not in dbus_iface.ListNames():
             logger.error("dbus-ble-advertisements service not found on D-Bus")
             return False
         
         # Check service health by calling GetVersion
-        service = bus.get_object('com.victronenergy.switch.bleadvertisements', '/ble_advertisements')
-        iface = dbus.Interface(service, 'com.victronenergy.switch.bleadvertisements')
+        service = bus.get_object('com.victronenergy.switch.ble_advertisements', '/ble_advertisements')
+        iface = dbus.Interface(service, 'com.victronenergy.switch.ble_advertisements')
         version = iface.GetVersion()
         
         logger.info(f"dbus-ble-advertisements service found (version: {version})")
@@ -268,7 +268,7 @@ def subscribe_to_advertisements(self):
     self.bus.add_signal_receiver(
         self.advertisement_callback,           # Your callback function
         signal_name='Advertisement',            # Signal name
-        dbus_interface='com.victronenergy.switch.bleadvertisements',  # Interface
+        dbus_interface='com.victronenergy.switch.ble_advertisements',  # Interface
         path_keyword='path'                     # Include path in callback
     )
     
@@ -387,11 +387,11 @@ class VictronMonitor:
             proxy = self.bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
             dbus_iface = dbus.Interface(proxy, 'org.freedesktop.DBus')
             
-            if 'com.victronenergy.switch.bleadvertisements' not in dbus_iface.ListNames():
+            if 'com.victronenergy.switch.ble_advertisements' not in dbus_iface.ListNames():
                 return False
             
-            service = self.bus.get_object('com.victronenergy.switch.bleadvertisements', '/ble_advertisements')
-            iface = dbus.Interface(service, 'com.victronenergy.switch.bleadvertisements')
+            service = self.bus.get_object('com.victronenergy.switch.ble_advertisements', '/ble_advertisements')
+            iface = dbus.Interface(service, 'com.victronenergy.switch.ble_advertisements')
             version = iface.GetVersion()
             logger.info(f"Found dbus-ble-advertisements version {version}")
             return True
@@ -413,7 +413,7 @@ class VictronMonitor:
         self.bus.add_signal_receiver(
             self.on_advertisement,
             signal_name='Advertisement',
-            dbus_interface='com.victronenergy.switch.bleadvertisements',
+            dbus_interface='com.victronenergy.switch.ble_advertisements',
             path_keyword='path'
         )
         logger.info("Subscribed to Advertisement signals")
@@ -533,7 +533,7 @@ if not self.check_router():
 
 **Solutions:**
 1. Check you're using correct path: `/ble_advertisements` (not `/`)
-2. Check correct interface: `com.victronenergy.switch.bleadvertisements`
+2. Check correct interface: `com.victronenergy.switch.ble_advertisements`
 3. Update router to latest version
 
 ### No Advertisements Received
