@@ -644,19 +644,13 @@ class BLEAdvertisementRouter:
             bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
             service_names = bus_iface.ListNames()
             
-            # Only scan services that could have BLE advertisement registrations
-            # Known client services that register for BLE advertisements:
-            # - com.victronenergy.switch.seelevel (SeeLevel tanks)
-            # - com.victronenergy.orion_tr (Orion TR DC-DC)
-            # Skip all others to avoid blocking introspection timeouts
-            likely_clients = [
-                'com.victronenergy.switch.seelevel',
-                'com.victronenergy.orion_tr',
-            ]
+            # Scan all com.victronenergy.* services (skip system services and unique names)
+            # Using async introspection so slow services won't block the mainloop
             self._pending_scan_services = [
                 s for s in service_names
                 if isinstance(s, str)
-                and s in likely_clients
+                and s.startswith('com.victronenergy.')
+                and not s.startswith(':')
             ]
             logging.info(
                 f"Queued {len(self._pending_scan_services)} services for async registration scan"
@@ -728,25 +722,33 @@ class BLEAdvertisementRouter:
         elif old_owner and not new_owner:
             self._remove_service_registrations(name)
     
-    def _check_service_registrations(self, service_name, timeout: float = 2.0):
-        """Check a single service for BLE registration paths.
+    def _check_service_registrations(self, service_name, timeout: float = 1.0):
+        """Check a single service for BLE registration paths using async D-Bus.
         
-        timeout: maximum time (seconds) to wait for D-Bus introspection. Kept
-        reasonably small when called from asynchronous scans to avoid blocking
-        the mainloop for too long.
+        Uses async introspection with reply/error handlers to avoid blocking
+        the D-Bus mainloop. The timeout parameter is respected for async calls.
         """
+        # Only check if this looks like a client service (not system services)
+        if not service_name.startswith('com.victronenergy.'):
+            return
+        
         try:
-            # Only check if this looks like a client service (not system services)
-            if not service_name.startswith('com.victronenergy.'):
-                return
-            
-            logging.debug(f"  Introspecting {service_name}...")
+            logging.debug(f"  Introspecting {service_name} (async, {timeout}s timeout)...")
             obj = self.bus.get_object(service_name, '/')
             intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
             
-            # Add timeout to avoid hanging on unresponsive services
-            xml = intro.Introspect(timeout=timeout)
-            
+            # Use async introspection - this won't block the mainloop
+            intro.Introspect(
+                reply_handler=lambda xml: self._on_introspect_reply(service_name, xml),
+                error_handler=lambda e: self._on_introspect_error(service_name, e),
+                timeout=timeout
+            )
+        except Exception as e:
+            logging.debug(f"  - Could not start introspection for {service_name}: {e}")
+    
+    def _on_introspect_reply(self, service_name, xml):
+        """Handle successful introspection reply."""
+        try:
             # Quick check: does this service have /ble_advertisements paths?
             if 'ble_advertisements' in xml:
                 logging.info(f"  ✓ Service {service_name} has ble_advertisements, parsing...")
@@ -758,13 +760,16 @@ class BLEAdvertisementRouter:
                 logging.debug("Cleared device cache (new registration)")
             else:
                 logging.debug(f"  - Service {service_name} has no ble_advertisements")
-        except dbus.exceptions.DBusException as e:
-            if 'Timeout' in str(e):
-                logging.warning(f"  ! Service {service_name} introspection timeout (skipping)")
-            else:
-                logging.debug(f"  - Could not check {service_name}: {e}")
         except Exception as e:
-            logging.debug(f"  - Could not check {service_name}: {e}")
+            logging.debug(f"  - Error processing introspection for {service_name}: {e}")
+    
+    def _on_introspect_error(self, service_name, error):
+        """Handle introspection error/timeout."""
+        error_str = str(error)
+        if 'Timeout' in error_str or 'NoReply' in error_str:
+            logging.debug(f"  ! Service {service_name} introspection timeout (skipping)")
+        else:
+            logging.debug(f"  - Could not check {service_name}: {error}")
     
     def _remove_service_registrations(self, service_name):
         """Remove all registrations and emitters for a service that disappeared"""
