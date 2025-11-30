@@ -853,15 +853,16 @@ class BLEAdvertisementRouter:
         try:
             root = ET.fromstring(xml)
             
-            # Check current path for pattern: /ble_advertisements/{service}/mfgr/{id}
-            # or /ble_advertisements/{service}/mfgr/{id}/pid/{product_id}
-            # or /ble_advertisements/{service}/mfgr/{id}/pid_range/{min}_{max}
-            # or /ble_advertisements/{service}/addr/{mac}
-            if '/ble_advertisements/' in path and '/mfgr/' in path:
-                # Check for product ID range: /mfgr/{id}/pid_range/{min}_{max}
-                if '/pid_range/' in path:
-                    # e.g., /ble_advertisements/orion_tr/mfgr/737/pid_range/41920_41951
-                    match = re.search(r'/mfgr/(\d+)/pid_range/(\d+)_(\d+)$', path)
+            # Registration path patterns (flat, no nesting):
+            # - /ble_advertisements/{service}/mfgr/{mfgr_id} - all devices from manufacturer
+            # - /ble_advertisements/{service}/mfgr_product/{mfgr_id}_{product_id} - specific product
+            # - /ble_advertisements/{service}/mfgr_product_range/{mfgr_id}_{low_pid}_{high_pid} - product range
+            # - /ble_advertisements/{service}/addr/{mac} - specific MAC address
+            
+            if '/ble_advertisements/' in path:
+                # Product range: /mfgr_product_range/{mfgr_id}_{low_pid}_{high_pid}
+                if '/mfgr_product_range/' in path:
+                    match = re.search(r'/mfgr_product_range/(\d+)_(\d+)_(\d+)$', path)
                     if match:
                         mfg_id = int(match.group(1))
                         min_pid = int(match.group(2))
@@ -870,12 +871,11 @@ class BLEAdvertisementRouter:
                         if key not in self.pid_range_registrations:
                             self.pid_range_registrations[key] = set()
                         self.pid_range_registrations[key].add(path)
-                        logging.info(f"Registered pid_range {path} from {service_name} (mfg={mfg_id}, pid={min_pid}-{max_pid})")
+                        logging.info(f"Registered mfgr_product_range {path} from {service_name} (mfg={mfg_id}, pid={min_pid}-{max_pid})")
                 
-                # Check for specific product ID: /mfgr/{id}/pid/{product_id}
-                elif '/pid/' in path:
-                    # e.g., /ble_advertisements/orion_tr/mfgr/737/pid/41937
-                    match = re.search(r'/mfgr/(\d+)/pid/(\d+)$', path)
+                # Specific product: /mfgr_product/{mfgr_id}_{product_id}
+                elif '/mfgr_product/' in path:
+                    match = re.search(r'/mfgr_product/(\d+)_(\d+)$', path)
                     if match:
                         mfg_id = int(match.group(1))
                         pid = int(match.group(2))
@@ -883,20 +883,20 @@ class BLEAdvertisementRouter:
                         if key not in self.pid_registrations:
                             self.pid_registrations[key] = set()
                         self.pid_registrations[key].add(path)
-                        logging.info(f"Registered pid {path} from {service_name} (mfg={mfg_id}, pid={pid})")
+                        logging.info(f"Registered mfgr_product {path} from {service_name} (mfg={mfg_id}, pid={pid})")
                 
-                # Manufacturer-only registration: /mfgr/{id}
-                else:
-                    # e.g., /ble_advertisements/orion_tr/mfgr/737 -> 737
-                    parts = path.split('/mfgr/')
-                    if len(parts) == 2 and '/' not in parts[1]:
-                        mfg_id = int(parts[1])
+                # Manufacturer only: /mfgr/{mfgr_id}
+                elif '/mfgr/' in path:
+                    match = re.search(r'/mfgr/(\d+)$', path)
+                    if match:
+                        mfg_id = int(match.group(1))
                         if mfg_id not in self.mfg_registrations:
                             self.mfg_registrations[mfg_id] = set()
                         self.mfg_registrations[mfg_id].add(path)
                         logging.info(f"Registered mfgr {path} from {service_name} (mfg={mfg_id})")
-            
-            elif '/ble_advertisements/' in path and '/addr/' in path:
+                
+                # MAC address: /addr/{mac}
+                elif '/addr/' in path:
                 # Extract MAC from path
                 # e.g., /ble_advertisements/orion_tr/addr/ef_c1_11_9d_a3_91 or /addr/EFC1119DA391
                 parts = path.split('/addr/')
