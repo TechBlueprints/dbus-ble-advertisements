@@ -44,8 +44,7 @@ import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
-HEARTBEAT_INTERVAL = 600  # 10 minutes
-REGISTRATION_SCAN_INTERVAL = 30  # Scan for new registrations every 30 seconds
+DEFAULT_LOG_INTERVAL = 3000  # 50 minutes - default (max) for logging routing activity per device
 # Device enabled states are stored in D-Bus settings at:
 # /Settings/Devices/ble_advertisements/Device_{mac_sanitized}/Enabled
 
@@ -265,25 +264,54 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
         # Add "Repeat Interval" slider - controls how long to ignore repeated identical packets
-        # Range: 0-1000 seconds, increments of 10. 0 = no filtering (route all packets)
+        # Range: 0-1000 seconds. GUI slider is hardcoded 1-100, we map it.
+        # 0 = no filtering (route all packets), 100 = 1000 seconds
         repeat_path = '/SwitchableOutput/relay_repeat_interval'
-        self.dbusservice.add_path(f'{repeat_path}/Name', '* Repeat Interval (seconds)')
+        self.dbusservice.add_path(f'{repeat_path}/Name', '* Repeat Interval: 600s')
         self.dbusservice.add_path(f'{repeat_path}/Type', 2)  # 2 = dimmer/slider
-        self.dbusservice.add_path(f'{repeat_path}/State', 60, writeable=True,
-                                   onchangecallback=self._on_repeat_interval_changed)
-        self.dbusservice.add_path(f'{repeat_path}/Status', 0x00)
+        self.dbusservice.add_path(f'{repeat_path}/State', 1, writeable=True)  # On/off state
+        self.dbusservice.add_path(f'{repeat_path}/Status', 0x09)  # On status
         self.dbusservice.add_path(f'{repeat_path}/Current', 0)
+        self.dbusservice.add_path(f'{repeat_path}/Dimming', 60, writeable=True,
+                                   onchangecallback=self._on_repeat_interval_changed)  # 60 = 600 seconds
+        self.dbusservice.add_path(f'{repeat_path}/Measurement', 600, writeable=True)  # Actual value in seconds
         self.dbusservice.add_path(f'{repeat_path}/Settings/CustomName', '', writeable=True)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/Type', 2, writeable=True)  # 2 = dimmer
-        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidTypes', 4)  # Bitmask: bit 2 set = dimmer (0b100 = 4)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/Function', 2, writeable=True)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidFunctions', 4)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Type', 2, writeable=False)  # Dimmable
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidTypes', 4)  # Only dimmable (bit 2)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/Function', 2, writeable=True)  # Manual
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ValidFunctions', 4)  # Bit 2 = Manual only
         self.dbusservice.add_path(f'{repeat_path}/Settings/Group', '', writeable=True)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default, shown when discovery enabled
-        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMin', 0.0)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMax', 1000.0)
-        self.dbusservice.add_path(f'{repeat_path}/Settings/StepSize', 10.0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/PowerOnState', 1)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMin', 1.0)   # Slider min
+        self.dbusservice.add_path(f'{repeat_path}/Settings/DimmingMax', 100.0) # Slider max
+        self.dbusservice.add_path(f'{repeat_path}/Settings/StepSize', 1.0)
         self.dbusservice.add_path(f'{repeat_path}/Settings/Decimals', 0)
+        self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default
+        
+        # Add "Log Interval" slider - controls how often to log routing activity per device
+        # Range: 0-3000 seconds. GUI slider is hardcoded 1-100, we map it.
+        # 0 = log every packet, 100 = 3000 seconds
+        log_path = '/SwitchableOutput/relay_log_interval'
+        self.dbusservice.add_path(f'{log_path}/Name', '* Log Interval: 3000s')
+        self.dbusservice.add_path(f'{log_path}/Type', 2)  # 2 = dimmer/slider
+        self.dbusservice.add_path(f'{log_path}/State', 1, writeable=True)  # On/off state
+        self.dbusservice.add_path(f'{log_path}/Status', 0x09)  # On status
+        self.dbusservice.add_path(f'{log_path}/Current', 0)
+        self.dbusservice.add_path(f'{log_path}/Dimming', 100, writeable=True,
+                                   onchangecallback=self._on_log_interval_changed)  # 100 = 3000 seconds
+        self.dbusservice.add_path(f'{log_path}/Measurement', DEFAULT_LOG_INTERVAL, writeable=True)  # Actual value in seconds
+        self.dbusservice.add_path(f'{log_path}/Settings/CustomName', '', writeable=True)
+        self.dbusservice.add_path(f'{log_path}/Settings/Type', 2, writeable=False)  # Dimmable
+        self.dbusservice.add_path(f'{log_path}/Settings/ValidTypes', 4)  # Only dimmable (bit 2)
+        self.dbusservice.add_path(f'{log_path}/Settings/Function', 2, writeable=True)  # Manual
+        self.dbusservice.add_path(f'{log_path}/Settings/ValidFunctions', 4)  # Bit 2 = Manual only
+        self.dbusservice.add_path(f'{log_path}/Settings/Group', '', writeable=True)
+        self.dbusservice.add_path(f'{log_path}/Settings/PowerOnState', 1)
+        self.dbusservice.add_path(f'{log_path}/Settings/DimmingMin', 1.0)   # Slider min
+        self.dbusservice.add_path(f'{log_path}/Settings/DimmingMax', 100.0) # Slider max
+        self.dbusservice.add_path(f'{log_path}/Settings/StepSize', 1.0)
+        self.dbusservice.add_path(f'{log_path}/Settings/Decimals', 0)
+        self.dbusservice.add_path(f'{log_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default
         
         # Runtime cache of discovered devices for fast lookup in hot path
         # Key: MAC without colons (e.g., "efc1119da391")
@@ -291,10 +319,14 @@ class BLEAdvertisementRouter:
         #   - route: bool (enabled for routing)
         #   - previous: bytes (last routed payload, only if route=True)
         #   - timestamp: float (last route time, only if route=True)
+        #   - last_log_time: float (last time we logged routing for this device)
         self.discovered_devices: Dict[str, dict] = {}
         
         # Repeat interval in seconds (cached from slider for fast access)
-        self._repeat_interval: int = 60
+        self._repeat_interval: int = 600
+        
+        # Log interval in seconds (cached from slider for fast access)
+        self._log_interval: int = DEFAULT_LOG_INTERVAL
         
         # Register device in settings (for GUI device list) - DO THIS BEFORE REGISTERING SERVICE
         settings = {
@@ -312,9 +344,15 @@ class BLEAdvertisementRouter:
             ],
             "RepeatInterval": [
                 "/Settings/Devices/ble_advertisements/RepeatInterval",
-                60,  # Default: 60 seconds
+                600,  # Default: 10 minutes (600 seconds)
                 0,
                 1000,
+            ],
+            "LogInterval": [
+                "/Settings/Devices/ble_advertisements/LogInterval",
+                DEFAULT_LOG_INTERVAL,  # Default: 3000 seconds (50 minutes)
+                0,
+                3000,
             ],
         }
         self._settings = SettingsDevice(
@@ -337,14 +375,35 @@ class BLEAdvertisementRouter:
         # simple switch implementations. Only State reflects on/off.
         if discovery_state:
             logging.info("Discovery enabled from saved settings")
-            # Show repeat interval slider when discovery is enabled
+            # Show repeat interval and log interval sliders when discovery is enabled
             self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 1
+            self.dbusservice['/SwitchableOutput/relay_log_interval/Settings/ShowUIControl'] = 1
         
         # Restore repeat interval from settings
         repeat_interval = self._settings['RepeatInterval']
         self._repeat_interval = int(repeat_interval)
-        self.dbusservice['/SwitchableOutput/relay_repeat_interval/State'] = repeat_interval
+        # Convert seconds to slider value (0-1000 -> 1-100)
+        if repeat_interval <= 0:
+            repeat_slider = 1
+        else:
+            repeat_slider = max(1, min(100, repeat_interval // 10))
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Dimming'] = repeat_slider
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = repeat_interval
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Repeat Interval: {repeat_interval}s'
         logging.info(f"Repeat interval set to {self._repeat_interval} seconds from saved settings")
+        
+        # Restore log interval from settings
+        log_interval = self._settings['LogInterval']
+        self._log_interval = int(log_interval)
+        # Convert seconds to slider value (0-3000 -> 1-100)
+        if log_interval <= 0:
+            log_slider = 1
+        else:
+            log_slider = max(1, min(100, log_interval // 30))
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Dimming'] = log_slider
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = log_interval
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Log Interval: {log_interval}s'
+        logging.info(f"Log interval set to {self._log_interval} seconds from saved settings")
         
         # Note: Device switches are created dynamically as BLE advertisements arrive.
         # Enabled/disabled state per device is stored in D-Bus settings and loaded
@@ -370,10 +429,6 @@ class BLEAdvertisementRouter:
         # Signal emitters for each registered path
         # Key: full path (e.g., '/ble_advertisements/orion_tr/mfgr/737'), Value: AdvertisementEmitter
         self.emitters: Dict[str, AdvertisementEmitter] = {}
-        
-        # Tracking for deduplication
-        # Key: (mac, mfg_id), Value: (data_bytes, timestamp)
-        self.last_advertisement: Dict[Tuple[str, int], Tuple[bytes, float]] = {}
         
         # Device name tracking
         # Key: MAC address, Value: device name (or empty string if unknown)
@@ -482,16 +537,48 @@ class BLEAdvertisementRouter:
         # Settings are already updated by SettingsDevice, no action needed
     
     def _on_repeat_interval_changed(self, path, value):
-        """Callback when repeat interval slider changes"""
-        new_interval = int(value)
+        """Callback when repeat interval slider changes (Dimming value 1-100)"""
+        slider_value = int(value)
+        # Map slider 1-100 to 0-1000 seconds (slider 1 = 0s, slider 100 = 1000s)
+        # Special case: slider 1 means 0 (no filtering)
+        if slider_value <= 1:
+            new_interval = 0
+        else:
+            new_interval = slider_value * 10  # 2->20s, 10->100s, 60->600s, 100->1000s
+        
         self._repeat_interval = new_interval
         self._settings['RepeatInterval'] = new_interval
-        logging.info(f"Repeat interval changed to {new_interval} seconds")
+        
+        # Update the display name and measurement
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Repeat Interval: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = new_interval
+        
+        logging.info(f"Repeat interval changed to {new_interval} seconds (slider={slider_value})")
         
         # Clear the cache so all devices get fresh timestamps
         self.discovered_devices.clear()
         logging.debug("Cleared device cache (repeat interval changed)")
         
+        return True
+    
+    def _on_log_interval_changed(self, path, value):
+        """Callback when log interval slider changes (Dimming value 1-100)"""
+        slider_value = int(value)
+        # Map slider 1-100 to 0-3000 seconds (slider 1 = 0s, slider 100 = 3000s)
+        # Special case: slider 1 means 0 (log every packet)
+        if slider_value <= 1:
+            new_interval = 0
+        else:
+            new_interval = slider_value * 30  # 2->60s, 10->300s, 100->3000s
+        
+        self._log_interval = new_interval
+        self._settings['LogInterval'] = new_interval
+        
+        # Update the display name and measurement
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Log Interval: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = new_interval
+        
+        logging.info(f"Log interval changed to {new_interval} seconds (slider={slider_value})")
         return True
     
     def _on_discovery_changed(self, path, value):
@@ -519,11 +606,12 @@ class BLEAdvertisementRouter:
                        and 'relay_discovery' not in p]
         
         if enabled:
-            # Discovery enabled: show all device toggles and repeat interval slider
+            # Discovery enabled: show all device toggles and settings sliders
             logging.info("Discovery enabled - showing all device switches")
             
-            # Show repeat interval slider
+            # Show repeat interval and log interval sliders
             self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 1
+            self.dbusservice['/SwitchableOutput/relay_log_interval/Settings/ShowUIControl'] = 1
             
             for state_path in relay_paths:
                 relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
@@ -536,11 +624,12 @@ class BLEAdvertisementRouter:
                     name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_part
                     logging.info(f"Made {name} visible in switches pane")
         else:
-            # Discovery disabled: hide ALL device switches and repeat interval slider
+            # Discovery disabled: hide ALL device switches and settings sliders
             logging.info("Discovery disabled - hiding all device switches")
             
-            # Hide repeat interval slider
+            # Hide repeat interval and log interval sliders
             self.dbusservice['/SwitchableOutput/relay_repeat_interval/Settings/ShowUIControl'] = 0
+            self.dbusservice['/SwitchableOutput/relay_log_interval/Settings/ShowUIControl'] = 0
             
             for state_path in relay_paths:
                 relay_part = state_path.split('/')[2]  # e.g., "relay_efc1119da391"
@@ -619,7 +708,8 @@ class BLEAdvertisementRouter:
             self.discovered_devices[relay_id] = {
                 'route': (state == 1),
                 'previous': None,
-                'timestamp': 0.0
+                'timestamp': 0.0,
+                'last_log_time': 0.0
             }
             return
         
@@ -649,7 +739,8 @@ class BLEAdvertisementRouter:
         self.discovered_devices[relay_id] = {
             'route': True,
             'previous': None,
-            'timestamp': 0.0
+            'timestamp': 0.0,
+            'last_log_time': 0.0
         }
         
         logging.info(f"Discovered new device: {name}")
@@ -1059,33 +1150,6 @@ class BLEAdvertisementRouter:
         
         return False
     
-    def should_emit_update(self, mac: str, mfg_id: int, data: bytes) -> bool:
-        """
-        Check if we should emit this advertisement update.
-        Returns True if data changed OR 10+ minutes elapsed.
-        """
-        key = (mac, mfg_id)
-        now = time.time()
-        
-        if key not in self.last_advertisement:
-            # First time seeing this device
-            self.last_advertisement[key] = (data, now)
-            return True
-        
-        last_data, last_time = self.last_advertisement[key]
-        
-        # Check if data changed
-        if data != last_data:
-            self.last_advertisement[key] = (data, now)
-            return True
-        
-        # Check if heartbeat interval elapsed
-        if now - last_time >= HEARTBEAT_INTERVAL:
-            self.last_advertisement[key] = (data, now)
-            return True
-        
-        return False
-    
     @dbus.service.signal(dbus_interface='com.victronenergy.switch.ble_advertisements',
                          signature='sqayn')
     def Advertisement(self, mac, manufacturer_id, data, rssi):
@@ -1177,10 +1241,6 @@ class BLEAdvertisementRouter:
         has_registration = self._has_registration_for_advertisement(mac, mfg_id, product_id)
         if not has_registration:
             return  # No one cares about this advertisement
-        
-        # Check if we should emit this update (deduplication)
-        if not self.should_emit_update(mac, mfg_id, data):
-            return
         
         # Step 2: Check if device is in our cache (fast path)
         relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
@@ -1288,11 +1348,32 @@ class BLEAdvertisementRouter:
                             self._missing_emitter_logged.add(path)
                             logging.warning(f"No emitter for registered path: {path}")
             
-            # Only log at debug level - we log at info when discovering new devices
+            # Log routing activity - throttled per device based on log interval slider
+            # If log interval is 0, log every routed packet
             if emitted_count > 0:
                 name_str = f" name='{device_name}'" if device_name else ""
                 pid_str = f" pid={product_id:#06x}" if product_id is not None else ""
-                logging.debug(f"Routed: {mac}{name_str} mfg={mfg_id:#06x}{pid_str} len={len(data)} → {emitted_count} path(s)")
+                log_msg = f"Routed: {mac}{name_str} mfg={mfg_id:#06x}{pid_str} len={len(data)} → {emitted_count} path(s)"
+                
+                # Check if we should log at INFO level (throttled per device)
+                relay_id = mac.replace(':', '').lower()
+                now = time.time()
+                should_log_info = False
+                
+                if self._log_interval == 0:
+                    # Log every packet when interval is 0
+                    should_log_info = True
+                elif relay_id in self.discovered_devices:
+                    cache_entry = self.discovered_devices[relay_id]
+                    last_log = cache_entry.get('last_log_time', 0.0)
+                    if (now - last_log) >= self._log_interval:
+                        should_log_info = True
+                        cache_entry['last_log_time'] = now
+                
+                if should_log_info:
+                    logging.info(log_msg)
+                else:
+                    logging.debug(log_msg)
         except Exception as e:
             logging.error(f"Failed to emit signal for {mac}: {e}")
     
