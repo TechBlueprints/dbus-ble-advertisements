@@ -191,7 +191,7 @@ mainloop.run()
 - **Auto-discovery**: The router scans for registrations at startup and when services appear/disappear (event-driven)
 - **No cleanup needed**: When your service exits, D-Bus automatically removes the objects and router cleans up emitters
 - **Signal parameters**: `Advertisement(mac, manufacturer_id, data, rssi, interface)` - includes which HCI interface saw it
-- **Deduplication**: Only data changes trigger signals (RSSI and interface changes alone don't trigger duplicates)
+- **Deduplication**: Identical packets are filtered based on the "Duplicate Resend Delay" slider (default 10 minutes)
 
 ### Filter Logic
 
@@ -225,6 +225,24 @@ The BLE Advertisements service automatically discovers BLE devices and creates s
 - **BLE Advertisements New Device Discovery** - Toggle to enable/disable automatic device discovery
 - **Discovered Devices** - Each discovered device gets its own enable/disable toggle with MAC address
 - **Active Indication** - The asterisk (*) indicates the discovery toggle is currently visible in the UI
+
+### Traffic Control Sliders
+
+When discovery is enabled, two additional sliders appear to help control D-Bus traffic and logging:
+
+**Duplicate Resend Delay** (0-1000 seconds, default: 600s / 10 minutes)
+- Controls how long identical BLE advertisement packets are ignored before being re-routed
+- Set to 0 to route every packet (high traffic)
+- Higher values reduce D-Bus traffic by filtering out repeated identical broadcasts
+- Useful when devices broadcast frequently but data rarely changes
+
+**Route Log Frequency** (0-3000 seconds, default: 3000s / 50 minutes)
+- Controls how often routing activity is logged per device
+- Set to 0 to log every routed packet (verbose, useful for debugging)
+- Higher values reduce log spam while still logging periodically
+- Does not affect actual packet routing, only logging
+
+Both settings are persisted across reboots and only visible when discovery is enabled.
 
 ### How to Re-enable Hidden Discovery
 
