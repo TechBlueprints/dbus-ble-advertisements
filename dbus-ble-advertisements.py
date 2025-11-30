@@ -607,33 +607,16 @@ class BLEAdvertisementRouter:
     def _delete_relay_paths(self, relay_id: str):
         """Delete all D-Bus paths for a relay switch.
         
+        Uses context manager to emit ItemsChanged signal so GUI updates.
+        
         Args:
             relay_id: MAC without colons (e.g., "efc1119da391")
         """
         output_path = f'/SwitchableOutput/relay_{relay_id}'
         
-        paths_to_delete = [
-            f'{output_path}/Name',
-            f'{output_path}/Type',
-            f'{output_path}/State',
-            f'{output_path}/Status',
-            f'{output_path}/Current',
-            f'{output_path}/Settings/CustomName',
-            f'{output_path}/Settings/Type',
-            f'{output_path}/Settings/ValidTypes',
-            f'{output_path}/Settings/Function',
-            f'{output_path}/Settings/ValidFunctions',
-            f'{output_path}/Settings/Group',
-            f'{output_path}/Settings/ShowUIControl',
-            f'{output_path}/Settings/PowerOnState',
-        ]
-        
-        for path in paths_to_delete:
-            if path in self.dbusservice:
-                try:
-                    del self.dbusservice[path]
-                except Exception as e:
-                    logging.warning(f"Failed to delete path {path}: {e}")
+        # Use context manager to emit ItemsChanged signal when done
+        with self.dbusservice as ctx:
+            ctx.del_tree(output_path)
     
     def _on_device_state_changed(self, device_id: str, path: str, value: int):
         """DEPRECATED - now using _on_relay_state_changed"""
