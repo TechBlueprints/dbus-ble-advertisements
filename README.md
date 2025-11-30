@@ -236,10 +236,11 @@ When discovery is enabled, two additional sliders appear to help control D-Bus t
 - Higher values reduce D-Bus traffic by filtering out repeated identical broadcasts
 - Useful when devices broadcast frequently but data rarely changes
 
-**Route Log Frequency** (0-3000 seconds, default: 3000s / 50 minutes)
+**Frequency to Log On Routing** (0-3000 seconds, default: 3000s / 50 minutes)
 - Controls how often routing activity is logged per device
 - Set to 0 to log every routed packet (verbose, useful for debugging)
 - Higher values reduce log spam while still logging periodically
+- Turn OFF to disable all routing/discovery logging
 - Does not affect actual packet routing, only logging
 
 Both settings are persisted across reboots and only visible when discovery is enabled.
