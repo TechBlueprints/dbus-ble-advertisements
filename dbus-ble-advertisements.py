@@ -422,13 +422,8 @@ class BLEAdvertisementRouter:
         relay_id = path_parts[2].replace('relay_', '')
         enabled = (value == 1)
         
-        # If a switch is turned OFF while discovery is enabled, clear the cache
-        # This allows the device to be re-discovered if it appears again
-        if not enabled:
-            discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
-            if discovery_enabled:
-                self.discovered_devices.clear()
-                logging.debug("Cleared device cache (switch disabled while discovery enabled)")
+        # Update the cache to reflect the new state (don't clear it)
+        self.discovered_devices[relay_id] = enabled
         
         # Status is always 0 (OK) - State indicates on/off
         self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0
