@@ -263,11 +263,11 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)  # 1 = visible in switches pane by default
         self.dbusservice.add_path(f'{output_path}/Settings/PowerOnState', 1)  # 1 = restore previous state on boot
         
-        # Add "Repeat Interval" slider - controls how long to ignore repeated identical packets
+        # Add "Duplicate Resend Delay" slider - controls how long to ignore repeated identical packets
         # Range: 0-1000 seconds. GUI slider is hardcoded 1-100, we map it.
         # 0 = no filtering (route all packets), 100 = 1000 seconds
         repeat_path = '/SwitchableOutput/relay_repeat_interval'
-        self.dbusservice.add_path(f'{repeat_path}/Name', '* Repeat Interval: 600s')
+        self.dbusservice.add_path(f'{repeat_path}/Name', '* Duplicate Resend Delay: 600s')
         self.dbusservice.add_path(f'{repeat_path}/Type', 2)  # 2 = dimmer/slider
         self.dbusservice.add_path(f'{repeat_path}/State', 1, writeable=True)  # On/off state
         self.dbusservice.add_path(f'{repeat_path}/Status', 0x09)  # On status
@@ -288,11 +288,11 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{repeat_path}/Settings/Decimals', 0)
         self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default
         
-        # Add "Log Interval" slider - controls how often to log routing activity per device
+        # Add "Route Log Frequency" slider - controls how often to log routing activity per device
         # Range: 0-3000 seconds. GUI slider is hardcoded 1-100, we map it.
         # 0 = log every packet, 100 = 3000 seconds
         log_path = '/SwitchableOutput/relay_log_interval'
-        self.dbusservice.add_path(f'{log_path}/Name', '* Log Interval: 3000s')
+        self.dbusservice.add_path(f'{log_path}/Name', '* Route Log Frequency: 3000s')
         self.dbusservice.add_path(f'{log_path}/Type', 2)  # 2 = dimmer/slider
         self.dbusservice.add_path(f'{log_path}/State', 1, writeable=True)  # On/off state
         self.dbusservice.add_path(f'{log_path}/Status', 0x09)  # On status
@@ -389,7 +389,7 @@ class BLEAdvertisementRouter:
             repeat_slider = max(1, min(100, repeat_interval // 10))
         self.dbusservice['/SwitchableOutput/relay_repeat_interval/Dimming'] = repeat_slider
         self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = repeat_interval
-        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Repeat Interval: {repeat_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Duplicate Resend Delay: {repeat_interval}s'
         logging.info(f"Repeat interval set to {self._repeat_interval} seconds from saved settings")
         
         # Restore log interval from settings
@@ -402,7 +402,7 @@ class BLEAdvertisementRouter:
             log_slider = max(1, min(100, log_interval // 30))
         self.dbusservice['/SwitchableOutput/relay_log_interval/Dimming'] = log_slider
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = log_interval
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Log Interval: {log_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Route Log Frequency: {log_interval}s'
         logging.info(f"Log interval set to {self._log_interval} seconds from saved settings")
         
         # Note: Device switches are created dynamically as BLE advertisements arrive.
@@ -550,7 +550,7 @@ class BLEAdvertisementRouter:
         self._settings['RepeatInterval'] = new_interval
         
         # Update the display name and measurement
-        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Repeat Interval: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_repeat_interval/Name'] = f'* Duplicate Resend Delay: {new_interval}s'
         self.dbusservice['/SwitchableOutput/relay_repeat_interval/Measurement'] = new_interval
         
         logging.info(f"Repeat interval changed to {new_interval} seconds (slider={slider_value})")
@@ -575,8 +575,12 @@ class BLEAdvertisementRouter:
         self._settings['LogInterval'] = new_interval
         
         # Update the display name and measurement
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Log Interval: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Route Log Frequency: {new_interval}s'
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = new_interval
+        
+        # Clear the cache so all devices get fresh log timestamps
+        self.discovered_devices.clear()
+        logging.debug("Cleared device cache (log interval changed)")
         
         logging.info(f"Log interval changed to {new_interval} seconds (slider={slider_value})")
         return True
