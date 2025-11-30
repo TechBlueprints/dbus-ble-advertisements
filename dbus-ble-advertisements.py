@@ -479,7 +479,7 @@ class BLEAdvertisementRouter:
                 
                 if show_path in self.dbusservice:
                     self.dbusservice[show_path] = 1
-                    name = self.dbusservice.get(name_path, relay_part) if name_path in self.dbusservice else relay_part
+                    name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_part
                     logging.info(f"Made {name} visible in switches pane")
         else:
             # Discovery disabled: remove disabled devices, hide enabled ones
