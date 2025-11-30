@@ -610,7 +610,7 @@ class BLEAdvertisementRouter:
         
         if not new_state:
             # When turned off, reset to default and turn back on
-            # Use idle_add to set state back to 1 after this callback returns
+            # Use timeout_add with 500ms delay to let the UI settle before resetting
             def reset_to_default():
                 try:
                     default_interval = DEFAULT_REPEAT_INTERVAL
@@ -633,7 +633,7 @@ class BLEAdvertisementRouter:
                     logging.error(f"Failed to reset repeat interval to default: {e}")
                 return False  # Don't repeat
             
-            GLib.idle_add(reset_to_default)
+            GLib.timeout_add(500, reset_to_default)  # 500ms delay
         return True
     
     def _on_log_interval_state_changed(self, path, value):
