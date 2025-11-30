@@ -170,7 +170,7 @@ class UIDevice(dbus.service.Object):
         try:
             # We don't own this bus name, we just publish objects on it
             # The bus name is owned by dbus-ble-sensors
-            proxy = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
+            proxy = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus', introspect=False)
             dbus_iface = dbus.Interface(proxy, 'org.freedesktop.DBus')
             
             if 'com.victronenergy.ble' not in dbus_iface.ListNames():
@@ -498,7 +498,7 @@ class BLEAdvertisementRouter:
         for old_path, new_path in zip(old_paths, new_paths):
             try:
                 # Check if old settings exist
-                settings_obj = self.bus.get_object('com.victronenergy.settings', old_path)
+                settings_obj = self.bus.get_object('com.victronenergy.settings', old_path, introspect=False)
                 settings_iface = dbus.Interface(settings_obj, 'com.victronenergy.BusItem')
                 old_value = settings_iface.GetValue()
                 
@@ -507,7 +507,7 @@ class BLEAdvertisementRouter:
                     
                     # Set the new path with the old value
                     try:
-                        new_obj = self.bus.get_object('com.victronenergy.settings', new_path)
+                        new_obj = self.bus.get_object('com.victronenergy.settings', new_path, introspect=False)
                         new_iface = dbus.Interface(new_obj, 'com.victronenergy.BusItem')
                         new_iface.SetValue(old_value)
                         logging.info(f"Successfully migrated settings to {new_path}")
@@ -854,7 +854,7 @@ class BLEAdvertisementRouter:
         GLib.idle_add.
         """
         try:
-            bus_obj = self.bus.get_object('org.freedesktop.DBus', '/')
+            bus_obj = self.bus.get_object('org.freedesktop.DBus', '/', introspect=False)
             bus_iface = dbus.Interface(bus_obj, 'org.freedesktop.DBus')
             service_names = bus_iface.ListNames()
             
@@ -949,7 +949,7 @@ class BLEAdvertisementRouter:
         
         try:
             logging.debug(f"  Introspecting {service_name} (async, {timeout}s timeout)...")
-            obj = self.bus.get_object(service_name, '/')
+            obj = self.bus.get_object(service_name, '/', introspect=False)
             intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
             
             # Use async introspection - this won't block the mainloop
@@ -1148,7 +1148,7 @@ class BLEAdvertisementRouter:
                 if child_name:
                     child_path = f"{path}/{child_name}".replace('//', '/')
                     try:
-                        obj = self.bus.get_object(service_name, child_path)
+                        obj = self.bus.get_object(service_name, child_path, introspect=False)
                         intro = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
                         child_xml = intro.Introspect()
                         self._parse_registrations(service_name, child_path, child_xml)
