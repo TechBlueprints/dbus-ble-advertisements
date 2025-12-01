@@ -1247,76 +1247,76 @@ class BLEAdvertisementRouter:
     
     def parse_btmon_line(self, line: str):
         """Parse btmon output line by line using pre-compiled regex patterns"""
-        line = line.strip()
-        
-        # Early exit for empty lines or lines that can't match anything useful
+        # Early exit for empty lines
         if not line or len(line) < 5:
             return
-        
-        # Quick prefix checks to avoid regex on irrelevant lines
-        # Most btmon lines start with specific characters
-        first_char = line[0]
         
         # Check for HCI interface marker (lines containing [hciN])
         if '[hci' in line:
             hci_match = RE_HCI.search(line)
             if hci_match:
                 self.current_interface = f"hci{hci_match.group(1)}"
+            return
         
-        # Lines starting with spaces contain the data we care about
-        if first_char == ' ':
-            # Check for Address (most common useful line)
-            if 'Address:' in line:
-                mac_match = RE_MAC.search(line)
-                if mac_match:
-                    self.current_mac = mac_match.group(1)
-                    self.current_name = None
-                    self.current_mfg_id = None
-                    self.current_rssi = None
-                    return
-            
-            # Only process these if we have a current MAC
-            if self.current_mac:
-                # Check for Name
-                if 'Name' in line and ':' in line:
-                    name_match = RE_NAME.search(line)
-                    if name_match:
-                        self.current_name = name_match.group(1).strip()
-                        self.device_names[self.current_mac] = self.current_name
-                        self._update_device_name_if_exists(self.current_mac, self.current_name)
-                        return
-                
-                # Check for RSSI
-                if 'RSSI:' in line:
-                    rssi_match = RE_RSSI.search(line)
-                    if rssi_match:
-                        self.current_rssi = int(rssi_match.group(1))
-                        return
-                
-                # Check for Company (manufacturer ID)
-                if 'Company:' in line:
-                    company_match = RE_COMPANY.search(line)
-                    if company_match:
-                        self.current_mfg_id = int(company_match.group(1))
-                        return
-                
-                # Check for Data (only if we have manufacturer ID)
-                if self.current_mfg_id is not None and 'Data:' in line:
-                    data_match = RE_DATA.search(line)
-                    if data_match:
-                        hex_data = data_match.group(1)
-                        self.process_advertisement(
-                            self.current_mac,
-                            self.current_mfg_id,
-                            hex_data,
-                            self.current_rssi or 0,
-                            self.current_interface or 'hci0'
-                        )
-                        # Reset state after processing
-                        self.current_mac = None
-                        self.current_mfg_id = None
-                        self.current_rssi = None
-                        self.current_interface = None
+        # Strip whitespace for content matching (btmon indents data lines)
+        line = line.strip()
+        if not line:
+            return
+        
+        # Check for Address (most common useful line)
+        if 'Address:' in line:
+            mac_match = RE_MAC.search(line)
+            if mac_match:
+                self.current_mac = mac_match.group(1)
+                self.current_name = None
+                self.current_mfg_id = None
+                self.current_rssi = None
+            return
+        
+        # Only process these if we have a current MAC
+        if not self.current_mac:
+            return
+        
+        # Check for Name
+        if 'Name' in line and ':' in line:
+            name_match = RE_NAME.search(line)
+            if name_match:
+                self.current_name = name_match.group(1).strip()
+                self.device_names[self.current_mac] = self.current_name
+                self._update_device_name_if_exists(self.current_mac, self.current_name)
+            return
+        
+        # Check for RSSI
+        if 'RSSI:' in line:
+            rssi_match = RE_RSSI.search(line)
+            if rssi_match:
+                self.current_rssi = int(rssi_match.group(1))
+            return
+        
+        # Check for Company (manufacturer ID)
+        if 'Company:' in line:
+            company_match = RE_COMPANY.search(line)
+            if company_match:
+                self.current_mfg_id = int(company_match.group(1))
+            return
+        
+        # Check for Data (only if we have manufacturer ID)
+        if self.current_mfg_id is not None and 'Data:' in line:
+            data_match = RE_DATA.search(line)
+            if data_match:
+                hex_data = data_match.group(1)
+                self.process_advertisement(
+                    self.current_mac,
+                    self.current_mfg_id,
+                    hex_data,
+                    self.current_rssi or 0,
+                    self.current_interface or 'hci0'
+                )
+                # Reset state after processing
+                self.current_mac = None
+                self.current_mfg_id = None
+                self.current_rssi = None
+                self.current_interface = None
     
     def process_advertisement(self, mac: str, mfg_id: int, hex_data: str, rssi: int, interface: str):
         """Process a complete BLE advertisement"""
