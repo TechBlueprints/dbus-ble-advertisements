@@ -49,6 +49,14 @@ DEFAULT_LOG_INTERVAL = 3000  # 50 minutes - default (max) for logging routing ac
 # Device enabled states are stored in D-Bus settings at:
 # /Settings/Devices/ble_advertisements/Device_{mac_sanitized}/Enabled
 
+# Pre-compiled regex patterns for btmon parsing (significant performance improvement)
+RE_HCI = re.compile(r'\[hci(\d+)\]')
+RE_MAC = re.compile(r'(?:LE )?Address: ([0-9A-F:]{17})')
+RE_NAME = re.compile(r'Name(?: \(complete\))?: (.+)')
+RE_RSSI = re.compile(r'RSSI: (-?\d+)')
+RE_COMPANY = re.compile(r'Company: .* \((\d+)\)')
+RE_DATA = re.compile(r'Data: ([0-9a-f]+)')
+
 
 class AdvertisementEmitter(dbus.service.Object):
     """D-Bus object that emits signals for a specific manufacturer or MAC"""
@@ -1238,64 +1246,77 @@ class BLEAdvertisementRouter:
         pass  # Signal is emitted by decorator
     
     def parse_btmon_line(self, line: str):
-        """Parse btmon output line by line"""
+        """Parse btmon output line by line using pre-compiled regex patterns"""
         line = line.strip()
         
-        # Match HCI interface (e.g., "@ MGMT Event: Device Found (0x0012) plen 30 {0001} [hci0]")
-        # or "< HCI Command: LE Set Scan Enable (0x08|0x000c) plen 2 [hci0]"
-        hci_match = re.search(r'\[hci(\d+)\]', line)
-        if hci_match:
-            self.current_interface = f"hci{hci_match.group(1)}"
-        
-        # Match MAC address - support both "Address:" and "LE Address:"
-        mac_match = re.search(r'(?:LE )?Address: ([0-9A-F:]{17})', line)
-        if mac_match:
-            self.current_mac = mac_match.group(1)
-            self.current_name = None  # Reset name for new device
-            self.current_mfg_id = None
-            self.current_rssi = None
-            # Keep current_interface from previous line
+        # Early exit for empty lines or lines that can't match anything useful
+        if not line or len(line) < 5:
             return
         
-        # Match device name (appears as "Name: Device Name" or "Name (complete): Device Name")
-        name_match = re.search(r'Name(?: \(complete\))?: (.+)', line)
-        if name_match and self.current_mac:
-            self.current_name = name_match.group(1).strip()
-            # Update device name cache
-            self.device_names[self.current_mac] = self.current_name
-            # Update the toggle name if this device is already discovered
-            self._update_device_name_if_exists(self.current_mac, self.current_name)
-            return
+        # Quick prefix checks to avoid regex on irrelevant lines
+        # Most btmon lines start with specific characters
+        first_char = line[0]
         
-        # Match RSSI
-        rssi_match = re.search(r'RSSI: (-?\d+)', line)
-        if rssi_match:
-            self.current_rssi = int(rssi_match.group(1))
-            return
+        # Check for HCI interface marker (lines containing [hciN])
+        if '[hci' in line:
+            hci_match = RE_HCI.search(line)
+            if hci_match:
+                self.current_interface = f"hci{hci_match.group(1)}"
         
-        # Match Company (manufacturer ID)
-        company_match = re.search(r'Company: .* \((\d+)\)', line)
-        if company_match:
-            self.current_mfg_id = int(company_match.group(1))
-            return
-        
-        # Match manufacturer data
-        if self.current_mac and self.current_mfg_id is not None:
-            data_match = re.search(r'Data: ([0-9a-f]+)', line)
-            if data_match:
-                hex_data = data_match.group(1)
-                self.process_advertisement(
-                    self.current_mac,
-                    self.current_mfg_id,
-                    hex_data,
-                    self.current_rssi or 0,
-                    self.current_interface or 'hci0'
-                )
-                # Reset state after processing
-                self.current_mac = None
-                self.current_mfg_id = None
-                self.current_rssi = None
-                self.current_interface = None
+        # Lines starting with spaces contain the data we care about
+        if first_char == ' ':
+            # Check for Address (most common useful line)
+            if 'Address:' in line:
+                mac_match = RE_MAC.search(line)
+                if mac_match:
+                    self.current_mac = mac_match.group(1)
+                    self.current_name = None
+                    self.current_mfg_id = None
+                    self.current_rssi = None
+                    return
+            
+            # Only process these if we have a current MAC
+            if self.current_mac:
+                # Check for Name
+                if 'Name' in line and ':' in line:
+                    name_match = RE_NAME.search(line)
+                    if name_match:
+                        self.current_name = name_match.group(1).strip()
+                        self.device_names[self.current_mac] = self.current_name
+                        self._update_device_name_if_exists(self.current_mac, self.current_name)
+                        return
+                
+                # Check for RSSI
+                if 'RSSI:' in line:
+                    rssi_match = RE_RSSI.search(line)
+                    if rssi_match:
+                        self.current_rssi = int(rssi_match.group(1))
+                        return
+                
+                # Check for Company (manufacturer ID)
+                if 'Company:' in line:
+                    company_match = RE_COMPANY.search(line)
+                    if company_match:
+                        self.current_mfg_id = int(company_match.group(1))
+                        return
+                
+                # Check for Data (only if we have manufacturer ID)
+                if self.current_mfg_id is not None and 'Data:' in line:
+                    data_match = RE_DATA.search(line)
+                    if data_match:
+                        hex_data = data_match.group(1)
+                        self.process_advertisement(
+                            self.current_mac,
+                            self.current_mfg_id,
+                            hex_data,
+                            self.current_rssi or 0,
+                            self.current_interface or 'hci0'
+                        )
+                        # Reset state after processing
+                        self.current_mac = None
+                        self.current_mfg_id = None
+                        self.current_rssi = None
+                        self.current_interface = None
     
     def process_advertisement(self, mac: str, mfg_id: int, hex_data: str, rssi: int, interface: str):
         """Process a complete BLE advertisement"""
