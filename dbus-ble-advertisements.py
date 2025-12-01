@@ -298,11 +298,11 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{repeat_path}/Settings/Decimals', 0)
         self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default
         
-        # Add "Frequency to Log On Routing" slider - controls how often to log routing activity per device
+        # Add "Logging frequency when routing" slider - controls how often to log routing activity per device
         # Range: 0-3000 seconds. GUI slider is hardcoded 1-100, we map it.
         # 0 = log every packet, 100 = 3000 seconds
         log_path = '/SwitchableOutput/relay_log_interval'
-        self.dbusservice.add_path(f'{log_path}/Name', '* Frequency to Log On Routing: 3000s')
+        self.dbusservice.add_path(f'{log_path}/Name', '* Logging frequency when routing: 3000s')
         self.dbusservice.add_path(f'{log_path}/Type', 2)  # 2 = dimmer/slider
         self.dbusservice.add_path(f'{log_path}/State', 1, writeable=True,
                                    onchangecallback=self._on_log_interval_state_changed)  # On/off state
@@ -425,7 +425,7 @@ class BLEAdvertisementRouter:
             log_slider = max(1, min(100, log_interval // 30))
         self.dbusservice['/SwitchableOutput/relay_log_interval/Dimming'] = log_slider
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = log_interval
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Frequency to Log On Routing: {log_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Logging frequency when routing: {log_interval}s'
         logging.info(f"Log interval set to {self._log_interval} seconds from saved settings")
         
         # Restore log enabled state from settings
@@ -749,7 +749,7 @@ class BLEAdvertisementRouter:
         self._settings['LogInterval'] = new_interval
         
         # Update the display name and measurement
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Frequency to Log On Routing: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Logging frequency when routing: {new_interval}s'
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = new_interval
         
         # Clear the cache so all devices get fresh log timestamps
@@ -795,7 +795,7 @@ class BLEAdvertisementRouter:
     def _on_log_interval_state_changed(self, path, value):
         """Callback when log interval toggle is turned off - disable routing logs"""
         new_state = bool(int(value) if isinstance(value, str) else value)
-        logging.info(f"Frequency to Log On Routing state changed to {'On' if new_state else 'Off'}")
+        logging.info(f"Logging frequency when routing state changed to {'On' if new_state else 'Off'}")
         
         # When off, we'll check this state before logging routed packets
         # The _log_enabled flag controls whether we log routing activity
