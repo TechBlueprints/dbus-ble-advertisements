@@ -1653,11 +1653,15 @@ class BLEAdvertisementRouter:
         
         try:
             # Read up to 20 lines per callback to reduce GLib→Python callback overhead
+            lines_read = 0
             for _ in range(20):
                 line = source.readline()
                 if not line:
                     break
+                lines_read += 1
                 self.parse_btmon_line(line)
+            if lines_read > 0:
+                logging.debug(f"Processed {lines_read} btmon lines")
         except Exception as e:
             logging.error(f"Error processing btmon line: {e}")
         
