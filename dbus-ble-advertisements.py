@@ -1475,14 +1475,17 @@ class BLEAdvertisementRouter:
             logging.error(f"Failed to emit signal for {mac}: {e}")
     
     def process_btmon_output(self, source, condition):
-        """GLib callback for btmon output"""
+        """GLib callback for btmon output - process multiple lines per callback to reduce overhead"""
         if condition == GLib.IO_HUP:
             logging.error("btmon process ended unexpectedly")
             return False
         
         try:
-            line = source.readline()
-            if line:
+            # Read up to 20 lines per callback to reduce GLib→Python callback overhead
+            for _ in range(20):
+                line = source.readline()
+                if not line:
+                    break
                 self.parse_btmon_line(line)
         except Exception as e:
             logging.error(f"Error processing btmon line: {e}")
