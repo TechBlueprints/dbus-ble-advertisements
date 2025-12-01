@@ -1365,9 +1365,29 @@ class BLEAdvertisementRouter:
             self._emit_advertisement(mac, mfg_id, data, rssi, interface)
             return
         
-        # Step 3: Not in cache - check if discovery is enabled AND there's a registration
+        # Step 3: Not in cache - check if there's a registration
+        if not has_registration:
+            return  # No one cares about this advertisement
+        
+        # Device has a registration but is not in cache
+        # Check if there's an existing D-Bus switch for this device (from previous session)
+        output_path = f'/SwitchableOutput/relay_{relay_id}'
+        if f'{output_path}/State' in self.dbusservice:
+            # Switch exists on D-Bus - restore to cache and route if enabled
+            state = self.dbusservice[f'{output_path}/State']
+            self.discovered_devices[relay_id] = {
+                'route': (state == 1),
+                'previous': data,
+                'timestamp': now,
+                'last_log_time': 0.0
+            }
+            if state == 1:
+                self._emit_advertisement(mac, mfg_id, data, rssi, interface)
+            return
+        
+        # No existing switch - only create one if discovery is enabled
         discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
-        if discovery_enabled and has_registration:
+        if discovery_enabled:
             # Create an enabled switch for this MAC
             device_name = self.device_names.get(mac, "")
             
@@ -1386,7 +1406,7 @@ class BLEAdvertisementRouter:
             
             # Route the advertisement
             self._emit_advertisement(mac, mfg_id, data, rssi, interface)
-        # else: discovery disabled or no registration -> don't create switch
+        # else: discovery disabled and no existing switch -> don't create new switch
     
     def _emit_advertisement(self, mac: str, mfg_id: int, data: bytes, rssi: int, interface: str):
         """Emit D-Bus signals for an advertisement to all matching registration paths"""
