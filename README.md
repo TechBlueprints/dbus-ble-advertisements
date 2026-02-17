@@ -236,7 +236,7 @@ When discovery is enabled, two additional sliders appear to help control D-Bus t
 - Higher values reduce D-Bus traffic by filtering out repeated identical broadcasts
 - Useful when devices broadcast frequently but data rarely changes
 
-**Frequency to Log On Routing** (0-3000 seconds, default: 3000s / 50 minutes)
+**Logging frequency when routing** (0-3000 seconds, default: 3000s / 50 minutes)
 - Controls how often routing activity is logged per device
 - Set to 0 to log every routed packet (verbose, useful for debugging)
 - Higher values reduce log spam while still logging periodically
@@ -314,6 +314,24 @@ svstat /service/dbus-ble-advertisements
 
 # View logs
 tail -f /var/log/dbus-ble-advertisements/current
+```
+
+## Disable / Uninstall
+
+To completely disable the service and clean up all settings:
+
+```bash
+bash /data/apps/dbus-ble-advertisements/disable.sh
+```
+
+This will:
+- Stop the service
+- Remove the service from startup (rc.local)
+- Clean up all D-Bus settings (including device switches)
+
+To fully remove, also delete the install directory:
+```bash
+rm -rf /data/apps/dbus-ble-advertisements
 ```
 
 ## License

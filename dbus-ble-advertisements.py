@@ -298,11 +298,11 @@ class BLEAdvertisementRouter:
         self.dbusservice.add_path(f'{repeat_path}/Settings/Decimals', 0)
         self.dbusservice.add_path(f'{repeat_path}/Settings/ShowUIControl', 0, writeable=True)  # Hidden by default
         
-        # Add "Frequency to Log On Routing" slider - controls how often to log routing activity per device
+        # Add "Logging frequency when routing" slider - controls how often to log routing activity per device
         # Range: 0-3000 seconds. GUI slider is hardcoded 1-100, we map it.
         # 0 = log every packet, 100 = 3000 seconds
         log_path = '/SwitchableOutput/relay_log_interval'
-        self.dbusservice.add_path(f'{log_path}/Name', '* Frequency to Log On Routing: 3000s')
+        self.dbusservice.add_path(f'{log_path}/Name', '* Logging frequency when routing: 3000s')
         self.dbusservice.add_path(f'{log_path}/Type', 2)  # 2 = dimmer/slider
         self.dbusservice.add_path(f'{log_path}/State', 1, writeable=True,
                                    onchangecallback=self._on_log_interval_state_changed)  # On/off state
@@ -388,6 +388,9 @@ class BLEAdvertisementRouter:
         
         logging.info("Registered BLE Advertisements on D-Bus")
         
+        # Restore persisted devices from settings BEFORE restoring discovery state
+        self._restore_devices_from_settings()
+        
         # Now restore discovery state from settings AFTER registering
         discovery_state = self._settings['DiscoveryEnabled']
         self.dbusservice['/SwitchableOutput/relay_discovery/State'] = discovery_state
@@ -422,7 +425,7 @@ class BLEAdvertisementRouter:
             log_slider = max(1, min(100, log_interval // 30))
         self.dbusservice['/SwitchableOutput/relay_log_interval/Dimming'] = log_slider
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = log_interval
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Frequency to Log On Routing: {log_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Logging frequency when routing: {log_interval}s'
         logging.info(f"Log interval set to {self._log_interval} seconds from saved settings")
         
         # Restore log enabled state from settings
@@ -535,6 +538,138 @@ class BLEAdvertisementRouter:
             except Exception as e:
                 logging.warning(f"Error during settings migration from {old_path}: {e}")
     
+    def _restore_devices_from_settings(self):
+        """Restore discovered devices from persistent settings on startup."""
+        try:
+            settings_proxy = self.bus.get_object('com.victronenergy.settings', '/Settings/Devices/ble_advertisements')
+            # Get all child paths under our settings
+            introspect_iface = dbus.Interface(settings_proxy, 'org.freedesktop.DBus.Introspectable')
+            xml_data = introspect_iface.Introspect()
+            
+            # Parse XML to find Device_* entries
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_data)
+            
+            restored_count = 0
+            for node in root.findall('node'):
+                node_name = node.get('name', '')
+                if node_name.startswith('Device_'):
+                    relay_id = node_name.replace('Device_', '').lower()
+                    
+                    # Read the device settings
+                    try:
+                        device_path = f'/Settings/Devices/ble_advertisements/{node_name}'
+                        device_proxy = self.bus.get_object('com.victronenergy.settings', device_path)
+                        device_iface = dbus.Interface(device_proxy, 'org.freedesktop.DBus.Introspectable')
+                        device_xml = device_iface.Introspect()
+                        device_root = ET.fromstring(device_xml)
+                        
+                        # Check for Enabled and Name settings
+                        has_enabled = any(n.get('name') == 'Enabled' for n in device_root.findall('node'))
+                        has_name = any(n.get('name') == 'Name' for n in device_root.findall('node'))
+                        
+                        if has_enabled:
+                            enabled_proxy = self.bus.get_object('com.victronenergy.settings', f'{device_path}/Enabled')
+                            enabled = int(enabled_proxy.GetValue())
+                            
+                            name = relay_id  # Default to relay_id
+                            if has_name:
+                                name_proxy = self.bus.get_object('com.victronenergy.settings', f'{device_path}/Name')
+                                name = str(name_proxy.GetValue())
+                            
+                            # Recreate the D-Bus switch for this device
+                            self._create_device_switch(relay_id, name, enabled)
+                            restored_count += 1
+                            
+                    except Exception as e:
+                        logging.warning(f"Failed to restore device {node_name}: {e}")
+            
+            if restored_count > 0:
+                logging.info(f"Restored {restored_count} device(s) from settings")
+                
+        except dbus.exceptions.DBusException as e:
+            # No devices saved yet - this is fine for fresh install
+            logging.debug(f"No saved devices to restore: {e}")
+        except Exception as e:
+            logging.warning(f"Error restoring devices from settings: {e}")
+    
+    def _save_device_to_settings(self, relay_id: str, name: str, enabled: bool):
+        """Save a device's state to persistent settings."""
+        try:
+            settings_path = f'/Settings/Devices/ble_advertisements/Device_{relay_id}'
+            
+            # Create settings entries for this device
+            settings_proxy = self.bus.get_object('com.victronenergy.settings', '/Settings')
+            settings_iface = dbus.Interface(settings_proxy, 'com.victronenergy.Settings')
+            
+            # Add Enabled setting
+            try:
+                settings_iface.AddSetting(
+                    'Devices/ble_advertisements',
+                    f'Device_{relay_id}/Enabled',
+                    1 if enabled else 0,
+                    'i',  # integer
+                    0,    # min
+                    1     # max
+                )
+            except dbus.exceptions.DBusException:
+                # Setting might already exist, try to update it
+                enabled_proxy = self.bus.get_object('com.victronenergy.settings', f'{settings_path}/Enabled')
+                enabled_proxy.SetValue(1 if enabled else 0)
+            
+            # Add Name setting
+            try:
+                settings_iface.AddSetting(
+                    'Devices/ble_advertisements',
+                    f'Device_{relay_id}/Name',
+                    name,
+                    's',  # string
+                    0,    # min (unused for strings)
+                    0     # max (unused for strings)
+                )
+            except dbus.exceptions.DBusException:
+                # Setting might already exist, try to update it
+                name_proxy = self.bus.get_object('com.victronenergy.settings', f'{settings_path}/Name')
+                name_proxy.SetValue(name)
+                
+        except Exception as e:
+            logging.warning(f"Failed to save device {relay_id} to settings: {e}")
+    
+    def _create_device_switch(self, relay_id: str, name: str, enabled: bool):
+        """Create a D-Bus switch for a device (used during restore and discovery)."""
+        output_path = f'/SwitchableOutput/relay_{relay_id}'
+        
+        # Check if already exists
+        if f'{output_path}/State' in self.dbusservice:
+            return
+        
+        # Create D-Bus paths for this device
+        with self.dbusservice as ctx:
+            ctx.add_path(f'{output_path}/Name', name)
+            ctx.add_path(f'{output_path}/Type', 1)  # 1 = toggle
+            ctx.add_path(f'{output_path}/State', 1 if enabled else 0, writeable=True,
+                         onchangecallback=self._on_relay_state_changed)
+            ctx.add_path(f'{output_path}/Status', 0)  # 0 = OK
+            ctx.add_path(f'{output_path}/Current', 0)
+            ctx.add_path(f'{output_path}/Settings/CustomName', '', writeable=True)
+            ctx.add_path(f'{output_path}/Settings/Type', 1, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ValidTypes', 2)
+            ctx.add_path(f'{output_path}/Settings/Function', 2, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ValidFunctions', 4)
+            ctx.add_path(f'{output_path}/Settings/Group', '', writeable=True)
+            ctx.add_path(f'{output_path}/Settings/ShowUIControl', 1, writeable=True)
+            ctx.add_path(f'{output_path}/Settings/PowerOnState', 1)
+        
+        # Add to runtime cache
+        self.discovered_devices[relay_id] = {
+            'route': enabled,
+            'previous': None,
+            'timestamp': 0.0,
+            'last_log_time': 0.0
+        }
+        
+        logging.debug(f"Created switch for device {name} ({relay_id}), enabled={enabled}")
+    
     def _on_relay_state_changed(self, path: str, value: int):
         """Callback when a discovered device relay state changes."""
         # Extract relay_id from path like "/SwitchableOutput/relay_efc1119da391/State"
@@ -545,8 +680,17 @@ class BLEAdvertisementRouter:
         relay_id = path_parts[2].replace('relay_', '')
         enabled = (value == 1)
         
-        # Clear cache - routing rules changed, let it repopulate
-        self.discovered_devices.clear()
+        # Update the cache entry instead of clearing everything
+        if relay_id in self.discovered_devices:
+            self.discovered_devices[relay_id]['route'] = enabled
+        else:
+            # Create cache entry if it doesn't exist
+            self.discovered_devices[relay_id] = {
+                'route': enabled,
+                'previous': None,
+                'timestamp': 0.0,
+                'last_log_time': 0.0
+            }
         
         # Status is always 0 (OK) - State indicates on/off
         self.dbusservice[f'/SwitchableOutput/relay_{relay_id}/Status'] = 0
@@ -555,6 +699,10 @@ class BLEAdvertisementRouter:
         name_path = f'/SwitchableOutput/relay_{relay_id}/Name'
         device_name = self.dbusservice[name_path] if name_path in self.dbusservice else relay_id
         logging.info(f"Device '{device_name}' routing: {'enabled' if enabled else 'disabled'}")
+        
+        # Persist to settings
+        self._save_device_to_settings(relay_id, device_name, enabled)
+        
         return True
     
     def _on_settings_changed(self, setting, old_value, new_value):
@@ -601,7 +749,7 @@ class BLEAdvertisementRouter:
         self._settings['LogInterval'] = new_interval
         
         # Update the display name and measurement
-        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Frequency to Log On Routing: {new_interval}s'
+        self.dbusservice['/SwitchableOutput/relay_log_interval/Name'] = f'* Logging frequency when routing: {new_interval}s'
         self.dbusservice['/SwitchableOutput/relay_log_interval/Measurement'] = new_interval
         
         # Clear the cache so all devices get fresh log timestamps
@@ -647,7 +795,7 @@ class BLEAdvertisementRouter:
     def _on_log_interval_state_changed(self, path, value):
         """Callback when log interval toggle is turned off - disable routing logs"""
         new_state = bool(int(value) if isinstance(value, str) else value)
-        logging.info(f"Frequency to Log On Routing state changed to {'On' if new_state else 'Off'}")
+        logging.info(f"Logging frequency when routing state changed to {'On' if new_state else 'Off'}")
         
         # When off, we'll check this state before logging routed packets
         # The _log_enabled flag controls whether we log routing activity
@@ -822,6 +970,9 @@ class BLEAdvertisementRouter:
             'timestamp': 0.0,
             'last_log_time': 0.0
         }
+        
+        # Persist to settings so device survives reboot
+        self._save_device_to_settings(relay_id, name, True)
         
         if self._log_enabled:
             logging.info(f"Discovered new device: {name}")
