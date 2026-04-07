@@ -3,6 +3,13 @@ echo "*** starting dbus-ble-advertisements ***"
 exec 2>&1
 . /etc/profile.d/profile.sh
 
+# Passive scanning requires bluetoothd with experimental features enabled
+if ! pidof bluetoothd > /dev/null 2>&1; then
+    echo "Starting bluetoothd with experimental features..."
+    /usr/libexec/bluetooth/bluetoothd -E &
+    sleep 2
+fi
+
 echo "Starting BLE advertisements service..."
 cd /data/apps/dbus-ble-advertisements
 exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u dbus-ble-advertisements.py

@@ -16,7 +16,8 @@
 """
 BLE Advertisement Router for Venus OS
 
-Monitors BLE advertisements via btmon and broadcasts them via D-Bus signals.
+Monitors BLE advertisements via passive scanning (BlueZ AdvertisementMonitor1)
+and broadcasts them via D-Bus signals.
 Only emits updates when data changes or 10 minutes have elapsed.
 Filters based on manufacturer IDs, product IDs, and MAC addresses registered via D-Bus.
 
@@ -28,16 +29,25 @@ Clients register by creating D-Bus objects at:
 
 The router emits Advertisement signals on those same paths (per-application).
 Each service gets its own signal path matching its registration.
+
+Passive scanning uses BlueZ AdvertisementMonitor1 D-Bus API instead of
+StartDiscovery, producing zero scan contention with other BLE services.
+Requires BlueZ >= 5.56 with --experimental enabled and Linux kernel >= 5.10.
 """
 
+import asyncio
 import re
-import subprocess
 import sys
+import threading
 import time
 import logging
 import signal
 import os
 from typing import Dict, Set, Tuple, Optional
+
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'ext', 'bleak'))
+from bleak import BleakScanner
+from bleak.assigned_numbers import AdvertisementDataType
 
 import dbus
 import dbus.service
@@ -49,13 +59,15 @@ DEFAULT_LOG_INTERVAL = 3000  # 50 minutes - default (max) for logging routing ac
 # Device enabled states are stored in D-Bus settings at:
 # /Settings/Devices/ble_advertisements/Device_{mac_sanitized}/Enabled
 
-# Pre-compiled regex patterns for btmon parsing (significant performance improvement)
-RE_HCI = re.compile(r'\[hci(\d+)\]')
-RE_MAC = re.compile(r'(?:LE )?Address: ([0-9A-F:]{17})')
-RE_NAME = re.compile(r'Name(?: \(complete\))?: (.+)')
-RE_RSSI = re.compile(r'RSSI: (-?\d+)')
-RE_COMPANY = re.compile(r'Company: .* \((\d+)\)')
-RE_DATA = re.compile(r'Data: ([0-9a-f]+)')
+PASSIVE_SCAN_OR_PATTERNS = [
+    (0, AdvertisementDataType.FLAGS, bytes([0x02])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x04])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x05])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x06])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x0e])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x1a])),
+    (0, AdvertisementDataType.FLAGS, bytes([0x1e])),
+]
 
 
 class AdvertisementEmitter(dbus.service.Object):
@@ -463,13 +475,10 @@ class BLEAdvertisementRouter:
         # Key: MAC address, Value: device name (or empty string if unknown)
         self.device_names: Dict[str, str] = {}
         
-        # btmon parsing state
-        self.current_mac = None
-        self.current_name = None
-        self.current_mfg_id = None
-        self.current_rssi = None
-        self.current_interface = None
-        self.btmon_proc = None
+        # Passive scanner state
+        self._scanner_thread = None
+        self._scanner_loop = None
+        self._scanner_stop = threading.Event()
         
         # Pending services for asynchronous registration scan
         self._pending_scan_services: list[str] = []
@@ -1396,96 +1405,145 @@ class BLEAdvertisementRouter:
         """
         pass  # Signal is emitted by decorator
     
-    def parse_btmon_line(self, line: str):
-        """Parse btmon output line by line using pre-compiled regex patterns"""
-        # Early exit for empty lines
-        if not line or len(line) < 5:
-            return
-        
-        # Check for HCI interface marker (lines containing [hciN])
-        if '[hci' in line:
-            hci_match = RE_HCI.search(line)
-            if hci_match:
-                self.current_interface = f"hci{hci_match.group(1)}"
-            return
-        
-        # Strip whitespace for content matching (btmon indents data lines)
-        line = line.strip()
-        if not line:
-            return
-        
-        # Check for Address (most common useful line)
-        if 'Address:' in line:
-            mac_match = RE_MAC.search(line)
-            if mac_match:
-                self.current_mac = mac_match.group(1)
-                self.current_name = None
-                self.current_mfg_id = None
-                self.current_rssi = None
-            return
-        
-        # Only process these if we have a current MAC
-        if not self.current_mac:
-            return
-        
-        # Check for Name
-        if 'Name' in line and ':' in line:
-            name_match = RE_NAME.search(line)
-            if name_match:
-                self.current_name = name_match.group(1).strip()
-                self.device_names[self.current_mac] = self.current_name
-                self._update_device_name_if_exists(self.current_mac, self.current_name)
-            return
-        
-        # Check for RSSI
-        if 'RSSI:' in line:
-            rssi_match = RE_RSSI.search(line)
-            if rssi_match:
-                self.current_rssi = int(rssi_match.group(1))
-            return
-        
-        # Check for Company (manufacturer ID)
-        if 'Company:' in line:
-            company_match = RE_COMPANY.search(line)
-            if company_match:
-                self.current_mfg_id = int(company_match.group(1))
-            return
-        
-        # Check for Data (only if we have manufacturer ID)
-        if self.current_mfg_id is not None and 'Data:' in line:
-            data_match = RE_DATA.search(line)
-            if data_match:
-                hex_data = data_match.group(1)
-                self.process_advertisement(
-                    self.current_mac,
-                    self.current_mfg_id,
-                    hex_data,
-                    self.current_rssi or 0,
-                    self.current_interface or 'hci0'
-                )
-                # Reset state after processing
-                self.current_mac = None
-                self.current_mfg_id = None
-                self.current_rssi = None
-                self.current_interface = None
-    
-    def process_advertisement(self, mac: str, mfg_id: int, hex_data: str, rssi: int, interface: str):
-        """Process a complete BLE advertisement"""
-        # Convert hex string to bytes first (needed to extract product ID)
+    def _get_adapter_names(self):
+        """Discover BlueZ adapter names via D-Bus"""
         try:
-            data = bytes.fromhex(hex_data)
-        except ValueError:
-            logging.warning(f"Invalid hex data from {mac}: {hex_data}")
+            manager = self.bus.get_object('org.bluez', '/')
+            obj_manager = dbus.Interface(manager, 'org.freedesktop.DBus.ObjectManager')
+            objects = obj_manager.GetManagedObjects()
+            adapters = []
+            for path, interfaces in objects.items():
+                if 'org.bluez.Adapter1' in interfaces:
+                    adapters.append(path.split('/')[-1])
+            return adapters or ['hci0']
+        except Exception as e:
+            logging.warning(f"Failed to discover adapters: {e}, defaulting to hci0")
+            return ['hci0']
+
+    def _start_passive_scanner(self):
+        """Start passive BLE scanning in a background thread"""
+        adapters = self._get_adapter_names()
+        logging.info(f"Starting passive BLE scanner on adapters: {adapters}")
+        self._scanner_thread = threading.Thread(
+            target=self._scanner_thread_main,
+            args=(adapters,),
+            daemon=True,
+            name='ble-passive-scanner'
+        )
+        self._scanner_thread.start()
+
+    def _bootstrap_existing_devices(self):
+        """Read all existing BlueZ device objects and process their ManufacturerData.
+        Handles cold-start: AdvertisementMonitor1 only fires PropertiesChanged for
+        *changed* properties, so devices already cached in BlueZ won't trigger
+        callbacks until their data changes. This reads the current state once."""
+        try:
+            manager = self.bus.get_object('org.bluez', '/')
+            obj_manager = dbus.Interface(manager, 'org.freedesktop.DBus.ObjectManager')
+            objects = obj_manager.GetManagedObjects()
+            count = 0
+            for path, ifaces in objects.items():
+                if 'org.bluez.Device1' not in ifaces:
+                    continue
+                props = ifaces['org.bluez.Device1']
+                mac = str(props.get('Address', ''))
+                name = str(props.get('Name', ''))
+                mfg_data = props.get('ManufacturerData', {})
+                adapter = path.split('/')[3] if len(path.split('/')) > 3 else 'hci0'
+                if name:
+                    self.device_names[mac] = name
+                for mfg_id_var, data_var in mfg_data.items():
+                    mfg_id = int(mfg_id_var)
+                    data = bytes(data_var)
+                    self.process_advertisement(mac, mfg_id, data, 0, adapter)
+                    count += 1
+            logging.info(f"Bootstrap: processed {count} manufacturer data entries from BlueZ cache")
+        except Exception as e:
+            logging.warning(f"Bootstrap failed: {e}")
+        return False
+
+    def _scanner_thread_main(self, adapters):
+        """Background thread running asyncio event loop for BLE scanning"""
+        self._scanner_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._scanner_loop)
+        try:
+            self._scanner_loop.run_until_complete(self._run_scanners(adapters))
+        except Exception as e:
+            logging.error(f"Scanner thread error: {e}")
+        finally:
+            self._scanner_loop.close()
+
+    async def _run_scanners(self, adapters):
+        """Run passive scanners on all adapters concurrently"""
+        def _make_callback(adapter_name):
+            def _cb(device, adv_data):
+                self._on_advertisement(device, adv_data, adapter_name)
+            return _cb
+
+        scanners = []
+        for adapter in adapters:
+            scanner = BleakScanner(
+                detection_callback=_make_callback(adapter),
+                scanning_mode='passive',
+                bluez=dict(or_patterns=PASSIVE_SCAN_OR_PATTERNS, adapter=adapter),
+            )
+            scanners.append((adapter, scanner))
+
+        for adapter, scanner in scanners:
+            try:
+                await scanner.start()
+                logging.info(f"Passive scanner started on {adapter}")
+            except Exception as e:
+                logging.error(f"Failed to start passive scanner on {adapter}: {e}")
+
+        while not self._scanner_stop.is_set():
+            await asyncio.sleep(1)
+
+        for adapter, scanner in scanners:
+            try:
+                await scanner.stop()
+            except Exception:
+                pass
+
+    def _on_advertisement(self, device, adv_data, adapter):
+        """Called from asyncio thread when a BLE advertisement is received.
+        Bridges each manufacturer_data entry to the GLib main thread."""
+        mac = device.address
+        rssi = adv_data.rssi or 0
+        name = adv_data.local_name or ""
+
+        if name:
+            self.device_names[mac] = name
+
+        mfg_data_dict = adv_data.manufacturer_data or {}
+        if mfg_data_dict:
+            for mfg_id, mfg_data in mfg_data_dict.items():
+                logging.debug(f"Passive scan: {mac} name='{name}' mfg={mfg_id:#06x} len={len(mfg_data)} rssi={rssi} via {adapter}")
+                GLib.idle_add(
+                    self._process_scanned_advertisement,
+                    mac, mfg_id, bytes(mfg_data), rssi, adapter, name
+                )
+        else:
+            logging.debug(f"Passive scan (no mfg data): {mac} name='{name}' rssi={rssi} via {adapter}")
+
+    def _process_scanned_advertisement(self, mac, mfg_id, data, rssi, interface, name):
+        """GLib idle callback - bridges from scanner thread to main thread"""
+        if name and self.device_names.get(mac) != name:
+            self.device_names[mac] = name
+            self._update_device_name_if_exists(mac, name)
+        self.process_advertisement(mac, mfg_id, data, rssi, interface)
+        return False
+
+    def process_advertisement(self, mac: str, mfg_id: int, data: bytes, rssi: int, interface: str):
+        """Process a complete BLE advertisement"""
+        if not self.should_process_advertisement(mac, mfg_id):
             return
         
-        # Extract product ID from the advertisement data (for Victron devices)
         product_id = self._extract_product_id(data)
         
-        # Step 1: Check if anything is registered to receive these notifications
-        # This now includes product ID filtering
         has_registration = self._has_registration_for_advertisement(mac, mfg_id, product_id)
         if not has_registration:
-            return  # No one cares about this advertisement
+            return
         
         # Step 2: Check if device is in our cache (fast path)
         relay_id = mac.replace(':', '').lower()  # e.g., "efc1119da391"
@@ -1494,23 +1552,16 @@ class BLEAdvertisementRouter:
         if relay_id in self.discovered_devices:
             cache_entry = self.discovered_devices[relay_id]
             
-            # Device is in cache - check if enabled for routing
             if not cache_entry['route']:
-                # Disabled -> don't route
                 return
             
-            # Check if we should filter this as a repeat
             if self._repeat_interval > 0:
                 previous = cache_entry.get('previous')
                 last_time = cache_entry.get('timestamp', 0.0)
                 
-                # If payload is identical and not enough time has passed, skip
                 if previous == data and (now - last_time) < self._repeat_interval:
-                    time_remaining = self._repeat_interval - (now - last_time)
-                    logging.debug(f"Discarding unchanged packet from {mac} (next route in {time_remaining:.0f}s)")
-                    return  # Filter out repeated identical packet
+                    return
             
-            # Route the advertisement and update cache
             cache_entry['previous'] = data
             cache_entry['timestamp'] = now
             self._emit_advertisement(mac, mfg_id, data, rssi, interface)
@@ -1536,7 +1587,6 @@ class BLEAdvertisementRouter:
                 self._emit_advertisement(mac, mfg_id, data, rssi, interface)
             return
         
-        # No existing switch - only create one if discovery is enabled
         discovery_enabled = self.dbusservice['/SwitchableOutput/relay_discovery/State'] == 1
         if discovery_enabled:
             # Create an enabled switch for this MAC
@@ -1645,73 +1695,34 @@ class BLEAdvertisementRouter:
         except Exception as e:
             logging.error(f"Failed to emit signal for {mac}: {e}")
     
-    def process_btmon_output(self, source, condition):
-        """GLib callback for btmon output - process multiple lines per callback to reduce overhead"""
-        if condition == GLib.IO_HUP:
-            logging.error("btmon process ended unexpectedly")
-            return False
-        
-        try:
-            # Read up to 20 lines per callback to reduce GLib→Python callback overhead
-            for _ in range(20):
-                line = source.readline()
-                if not line:
-                    break
-                self.parse_btmon_line(line)
-        except Exception as e:
-            logging.error(f"Error processing btmon line: {e}")
-        
-        return True
-    
     def cleanup(self, signum=None, frame=None):
         """Cleanup on exit"""
         logging.info("Shutting down...")
-        
-        # Stop btmon
-        if self.btmon_proc:
-            try:
-                self.btmon_proc.terminate()
-                self.btmon_proc.wait(timeout=1)
-            except:
-                try:
-                    self.btmon_proc.kill()
-                except:
-                    pass
-        
+
+        self._scanner_stop.set()
+        if self._scanner_thread and self._scanner_thread.is_alive():
+            self._scanner_thread.join(timeout=5)
+
         sys.exit(0)
     
     def run(self):
         """Start the router service"""
         signal.signal(signal.SIGINT, self.cleanup)
         signal.signal(signal.SIGTERM, self.cleanup)
-        
-        # Start btmon - mirror seelevel's working approach
-        try:
-            self.btmon_proc = subprocess.Popen(
-                ['btmon'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                universal_newlines=True,
-                bufsize=1
-            )
-            logging.info("Started btmon")
-        except Exception as e:
-            logging.error(f"Failed to start btmon: {e}")
-            return 1
-        
-        # Add GLib watch for btmon output - mirror seelevel's working approach
-        GLib.io_add_watch(
-            self.btmon_proc.stdout,
-            GLib.IO_IN | GLib.IO_HUP,
-            self.process_btmon_output
-        )
-        logging.info("btmon output handler registered")
+
+        self._start_passive_scanner()
         
         # Kick off an asynchronous initial registration scan. We schedule it via
         # GLib.idle_add so that we only ever inspect one service per idle loop,
         # avoiding long blocking periods that could cause D-Bus timeouts for
         # other clients (notably the GUI asking for GetItems on this service).
         self._schedule_initial_scan()
+        
+        # Bootstrap existing devices from BlueZ cache after registrations load.
+        # AdvertisementMonitor1 only fires callbacks on property changes, so
+        # devices already cached won't trigger until their data changes. Delay
+        # gives the registration scan time to complete first.
+        GLib.timeout_add_seconds(5, self._bootstrap_existing_devices)
         
         mainloop = GLib.MainLoop()
         logging.info("Router service running...")
@@ -1730,7 +1741,7 @@ def main():
         format='%(asctime)s - %(message)s'
     )
     
-    logging.info("BLE Advertisement Router v1.0.0")
+    logging.info("BLE Advertisement Router v1.1.0 (passive scan)")
     
     # Initialize D-Bus
     DBusGMainLoop(set_as_default=True)
