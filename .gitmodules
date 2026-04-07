@@ -1,0 +1,3 @@
+[submodule "ext/bleak"]
+	path = ext/bleak
+	url = git@github.com:hbldh/bleak.git
