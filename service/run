@@ -10,6 +10,13 @@ if ! pidof bluetoothd > /dev/null 2>&1; then
     sleep 2
 fi
 
+# Prevent vesmart-server from mass-disconnecting all BLE devices every 60s.
+# See: https://github.com/victronenergy/venus/issues/1587
+if [ -f /data/vesmart-safety/vesmart-safety.sh ]; then
+    . /data/vesmart-safety/vesmart-safety.sh
+    ensure_vesmart_safe
+fi
+
 echo "Starting BLE advertisements service..."
 cd /data/apps/dbus-ble-advertisements
 exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u dbus-ble-advertisements.py
